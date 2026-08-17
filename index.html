@@ -1,0 +1,4600 @@
+<!DOCTYPE html>
+<html lang="az">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>⚡ BAKUGO</title>
+
+<!-- ===== PWA meta / manifest ===== -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#020712">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BakuGo">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+
+<script>
+  // Service worker qeydiyyatı — PWA-nın quraşdırıla bilən (installable) olması
+  // və APK generasiyası (PWABuilder/TWA) üçün tələb olunur.
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("sw.js").catch(function (err) {
+        console.error("SW qeydiyyat xətası:", err);
+      });
+    });
+  }
+</script>
+
+<script>
+  // KRİTİK: tema (dark/light) səhifə çəkilməzdən ƏVVƏL tətbiq olunur ki, işıqlı->tünd
+  // "rəng sıçrayışı" (flash of wrong theme) baş verməsin. Bu skript <head>-in ən başında
+  // olmalıdır - CSS və body-dən əvvəl işə düşür.
+  (function(){
+    try{
+      var savedMode = localStorage.getItem("displayMode") || "light";
+      document.documentElement.setAttribute("data-theme", savedMode);
+    }catch(e){}
+  })();
+</script>
+<script>
+  // Diaqnostika: JS xətalarını yalnız developer console-a yazır (production-da istifadəçiyə alert popup çıxmır)
+  window.addEventListener('error', function(e){
+    console.error('JS XƏTASI:', e.message, e.filename, e.lineno);
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    console.error('PROMISE XƏTASI:', e.reason);
+  });
+</script>
+<script>
+  // Offline keş: sw.js faylı index.html ilə EYNİ qovluqda olmalıdır (Firebase Hosting/serverdə).
+  // Bu, ikinci açılışı ani edir və internetsiz halda son görülən ekranı göstərir.
+  // Firestore canlı data (qiymət, sifariş statusu) sw.js daxilində KEŞLƏNMİR - həmişə tikilir.
+  if("serviceWorker" in navigator){
+    window.addEventListener("load", function(){
+      navigator.serviceWorker.register("sw.js").catch(function(err){
+        console.error("Service Worker qeydiyyat xətası:", err);
+      });
+    });
+  }
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@600;700;800&display=swap" rel="stylesheet">
+<!-- Leaflet (xəritə) BURADA yüklənmir - yalnız istifadəçi məkan seçəndə lazy-load olunur (aşağıda loadLeaflet()) -->
+
+<style>
+:root{
+--orange:#ff5722;
+--orange-hot:#b23a13;
+--orange-deep:#4a1206;
+--deep-teal:#061c1b;
+--deep-forest:#08160e;
+--deep-amber:#1c1206;
+--deep-navy:#050a10;
+--bg:#020712;
+--card:#060a14;
+--glass:rgba(255,255,255,0.04);
+--nebula-blue:#0a3d91;
+--nebula-cyan:#22c3ff;
+--nebula-deep:#040c1e;
+--nebula-red:#ff3b3b;
+--moon-gold:#ffb24d;
+--cta-red:#ff2e2e;
+--price-gold:#ffc93c;
+--aurora-violet:#6a1fd4;
+--aurora-magenta:#b8248c;
+--aurora-indigo:#161a5c;
+--price-gold:#b8860b;
+--ink:#2b1c08;
+--ink-soft:rgba(43,28,8,0.68);
+--ink-faint:rgba(43,28,8,0.45);
+--cream:#fff8ea;
+}
+html[data-theme="dark"]{
+--ink:#f5ecd8;
+--ink-soft:rgba(245,236,216,0.72);
+--ink-faint:rgba(245,236,216,0.46);
+}
+*{margin:0;padding:0;box-sizing:border-box;font-family:sans-serif;}
+html{
+overscroll-behavior:none;
+overscroll-behavior-y:none;
+overscroll-behavior-x:none;
+}
+html, body{
+overscroll-behavior:none;
+overscroll-behavior-y:none;
+touch-action: pan-x pan-y;
+min-height:100%;
+min-height:100dvh;
+}
+body::after{
+content:"";
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+background:url("https://grainy-gradients.vercel.app/noise.svg");
+opacity:0.05;
+pointer-events:none;
+transform: translateZ(0);
+backface-visibility: hidden;
+will-change: transform;
+}
+body{
+background: #fdf3dc;
+color:var(--ink);
+transition:background 0.4s, color 0.4s;
+overflow-x:hidden;
+}
+html[data-theme="dark"] body{
+background: var(--bg);
+}
+
+body::before{
+content:"";
+position:fixed;
+inset:0;
+z-index:-5;
+pointer-events:none;
+transform: translateZ(0);
+backface-visibility: hidden;
+will-change: transform;
+background:radial-gradient(circle at 15% 0%, rgba(255,209,120,0.35), transparent 55%),
+radial-gradient(circle at 65% 12%, rgba(255,190,90,0.30), transparent 50%),
+radial-gradient(circle at 100% 10%, rgba(255,226,150,0.28), transparent 55%),
+radial-gradient(circle at 100% 100%, rgba(255,198,110,0.32), transparent 60%),
+radial-gradient(circle at 20% 85%, rgba(255,214,140,0.26), transparent 50%),
+radial-gradient(circle at 0% 100%, rgba(255,178,80,0.22), transparent 55%),
+radial-gradient(ellipse at center, transparent 20%, rgba(255,248,230,0.9) 100%);
+}
+
+#bgGradient{
+position:fixed;
+inset:0;
+background: linear-gradient(-45deg, #fffdf6, #fff3d6, #ffe6a8, #fff8e8, #ffedc2, #fdf3dd, #fffdf6);
+background-size: 500% 500%;
+background-position: 50% 50%;
+will-change: transform;
+transform: translateZ(0);
+backface-visibility: hidden;
+z-index:-4;
+pointer-events:none;
+}
+
+@keyframes gradientFlow{
+0%{background-position:0% 50%;}
+50%{background-position:100% 50%;}
+100%{background-position:0% 50%;}
+}
+
+html[data-theme="dark"] body::before{
+background:radial-gradient(circle at 15% 0%, rgba(10,61,145,0.35), transparent 55%),
+radial-gradient(circle at 65% 12%, rgba(34,195,255,0.22), transparent 50%),
+radial-gradient(circle at 100% 10%, rgba(106,31,212,0.24), transparent 55%),
+radial-gradient(circle at 100% 100%, rgba(184,36,140,0.22), transparent 60%),
+radial-gradient(circle at 20% 85%, rgba(10,61,145,0.22), transparent 50%),
+radial-gradient(circle at 0% 100%, rgba(255,178,80,0.10), transparent 55%),
+radial-gradient(ellipse at center, transparent 20%, rgba(2,7,18,0.92) 100%);
+}
+
+html[data-theme="dark"] #bgGradient{
+background: linear-gradient(-45deg, var(--nebula-deep), var(--deep-navy), var(--aurora-indigo), var(--deep-teal), var(--nebula-deep), var(--deep-navy), var(--nebula-deep));
+background-size: 500% 500%;
+filter:contrast(1.05) brightness(0.95) saturate(1.15);
+}
+
+html[data-theme="dark"] header{
+background: rgba(5,10,18,0.78);
+border-bottom: 1px solid rgba(34,195,255,0.18);
+}
+
+html[data-theme="dark"] .card{
+background: rgba(10,14,26,0.62);
+border: 1px solid rgba(34,195,255,0.16);
+box-shadow: 0 6px 18px rgba(0,0,0,0.35);
+}
+
+html[data-theme="dark"] .search input{
+background: rgba(255,255,255,0.06);
+border: 1px solid rgba(34,195,255,0.20);
+box-shadow: 0 4px 14px rgba(0,0,0,0.25);
+}
+html[data-theme="dark"] .search input:focus{background-color:rgba(255,255,255,0.10);}
+
+html[data-theme="dark"] .chain-badge.count{background:rgba(255,255,255,0.08);}
+html[data-theme="dark"] .chain-arrow{background:rgba(255,255,255,0.08);}
+html[data-theme="dark"] .chain-header.open .chain-arrow{background:rgba(255,122,0,0.22);}
+html[data-theme="dark"] .chain-section{
+background:linear-gradient(145deg,rgba(20,24,38,0.75),rgba(14,18,30,0.55));
+border:1px solid rgba(34,195,255,0.16);
+box-shadow:0 6px 20px rgba(0,0,0,0.3);
+}
+html[data-theme="dark"] .chain-header:hover{background:rgba(255,255,255,0.06);}
+html[data-theme="dark"] .cat-icon{
+background:linear-gradient(150deg,rgba(20,24,38,0.75),rgba(14,18,30,0.55));
+border:1px solid rgba(34,195,255,0.18);
+box-shadow:0 6px 16px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+}
+html[data-theme="dark"] .delivery-strip{
+background:linear-gradient(145deg,rgba(255,122,0,0.14),rgba(255,255,255,0.04));
+border:1px solid rgba(255,122,0,0.25);
+}
+html[data-theme="dark"] #splash{
+background:radial-gradient(circle at 50% 40%, #0a1428 0%, #020712 65%, #020712 100%);
+}
+html[data-theme="dark"] #auth{
+background:radial-gradient(circle at 50% 30%, #0a1428 0%, #020712 70%);
+}
+
+html::before{
+content:"";
+position:fixed;
+inset:-10%;
+z-index:-3;
+pointer-events:none;
+background:
+radial-gradient(ellipse 60% 40% at 30% 20%, rgba(255,214,140,0.20), transparent 60%),
+radial-gradient(ellipse 50% 35% at 75% 70%, rgba(255,197,110,0.16), transparent 60%),
+radial-gradient(ellipse 45% 30% at 20% 85%, rgba(255,232,182,0.16), transparent 60%);
+filter:blur(40px);
+}
+
+html[data-theme="dark"]::before{
+background:
+radial-gradient(ellipse 60% 40% at 30% 20%, rgba(106,31,212,0.22), transparent 60%),
+radial-gradient(ellipse 50% 35% at 75% 70%, rgba(34,195,255,0.16), transparent 60%),
+radial-gradient(ellipse 45% 30% at 20% 85%, rgba(184,36,140,0.16), transparent 60%);
+}
+
+@keyframes auroraDrift{
+0%{transform:translate(0,0) scale(1);}
+33%{transform:translate(3%,-4%) scale(1.08);}
+66%{transform:translate(-4%,3%) scale(1.04);}
+100%{transform:translate(0,0) scale(1);}
+}
+
+.card.discounted {
+  border: 1px solid #ff7a00;
+  position: relative;
+  box-shadow: 0 0 22px rgba(255,90,0,0.6), 0 0 10px rgba(255,60,0,0.4) inset;
+  z-index: 1;
+}
+.card.discounted::after {
+  content: "🔥";
+  position: absolute;
+  bottom: 8px; left: 8px;
+  z-index: 6;
+  font-size: 18px;
+  filter: drop-shadow(0 0 8px rgba(255,90,0,0.9)) drop-shadow(0 0 16px rgba(255,40,0,0.6));
+  pointer-events: none;
+}
+.original-price { text-decoration: line-through; color: #888; font-size: 12px; margin-right: 5px; }
+.discount-tag { background: linear-gradient(135deg,var(--cta-red),var(--orange)); color: white; padding: 4px 10px; border-radius: 6px; font-size: 14px; font-weight: 800; display:inline-block; box-shadow: 0 0 8px rgba(255,46,46,0.45); }
+#splash{
+position:fixed;inset:0;
+background:radial-gradient(circle at 50% 40%, #ffe6a8 0%, #fdf3dc 65%, #fdf3dc 100%);
+display:flex;justify-content:center;align-items:center;
+z-index:9999;
+}
+#splash h1{
+color:#ff9d3d;
+font-size:45px;
+text-shadow:0 0 20px rgba(255,157,61,0.35), 0 0 45px rgba(34,195,255,0.25);
+}
+@keyframes zoom{from{transform:scale(1);}to{transform:scale(1.25);}}
+
+#auth{
+position:fixed;inset:0;background:radial-gradient(circle at 50% 30%, #ffe6a8 0%, #fdf3dc 70%);
+display:none;justify-content:center;align-items:center;
+z-index:9998;
+}
+.auth-box{
+background:#080808;padding:20px;border-radius:15px;width:90%;max-width:340px;
+color:#f5ece0;
+}
+.auth-box input{
+width:100%;margin:10px 0;padding:12px;
+border:none;border-radius:10px;background:#0e0e0e;color:#fff;
+}
+.auth-box button{
+width:100%;padding:12px;margin-top:10px;
+background:var(--orange);border:none;border-radius:10px;
+cursor:pointer;
+}
+.skip{background:none;border:1px solid var(--orange);color:var(--orange);}
+
+header{
+display:flex;justify-content:space-between;align-items:center;
+padding:15px;background:rgba(255, 250, 235, 0.78);
+backdrop-filter: blur(14px);
+border-bottom: 1px solid rgba(200,150,60,0.20);
+box-shadow:0 4px 20px rgba(180,130,40,0.08);
+}
+.logo{font-weight:bold;font-size:28px;display:flex;gap:3px;align-items:center;}
+
+.fire-logo span{
+position:relative;
+color:#ffae00;
+font-weight:900;
+text-shadow:
+0 0 5px #ff7a00,
+0 0 10px #ff7a00,
+0 0 20px #ff3c00,
+0 0 40px #ff0000;
+}
+
+.fire-logo span::before{
+content:"";
+position:absolute;
+top:-18px;
+left:50%;
+transform:translateX(-50%);
+width:14px;
+height:22px;
+background:
+radial-gradient(circle,
+#fff 0%,
+#ffd000 30%,
+#ff7a00 60%,
+transparent 100%);
+border-radius:50% 50% 40% 40%;
+filter:blur(1px);
+opacity:.9;
+}
+
+@keyframes flicker{
+0%{transform:translateY(0px) scale(1);opacity:1;}
+25%{transform:translateY(-1px) scale(1.03);opacity:.95;}
+50%{transform:translateY(1px) scale(.98);opacity:1;}
+75%{transform:translateY(-2px) scale(1.04);opacity:.9;}
+100%{transform:translateY(0px) scale(1);opacity:1;}
+}
+
+@keyframes flame{
+0%{transform:translateX(-50%) scale(1);opacity:.8;}
+50%{transform:translateX(-50%) translateY(-4px) scale(1.15);opacity:1;}
+100%{transform:translateX(-50%) scale(.9);opacity:.7;}
+}
+
+.header-icons{display:flex;gap:10px;}
+.icon{
+width:40px;height:40px;border-radius:50%;
+background:#080808;display:flex;align-items:center;justify-content:center;
+cursor:pointer;position:relative;
+transition:0.3s;
+}
+.icon:hover{transform:scale(1.1);}
+.badge{
+position:absolute;top:-5px;right:-5px;
+background:red;font-size:10px;padding:3px 6px;border-radius:50%;
+}
+
+.panel{
+position:fixed;top:0;height:100%;width:320px;
+background:rgba(6,12,24,0.88);
+backdrop-filter:blur(12px);
+border:1px solid rgba(34,195,255,0.12);
+padding:25px;
+transition:0.5s cubic-bezier(0.19, 1, 0.22, 1);
+z-index:9997;
+overflow:auto;
+box-shadow:0 0 40px rgba(0,0,0,0.5), 0 0 60px rgba(10,61,145,0.12);
+color:#f5ece0;
+}
+.left{left:-100%; border-radius:0 30px 30px 0;}
+.left.active{left:0;}
+.right{right:-100%; border-radius:30px 0 0 30px;}
+.right.active{right:0;}
+
+.delivery-notice{
+display:flex;
+gap:12px;
+align-items:flex-start;
+margin:14px 0 18px;
+padding:14px 16px;
+border-radius:18px;
+background:linear-gradient(150deg,rgba(255,122,0,0.12),rgba(255,255,255,0.02));
+border:1px solid rgba(255,122,0,0.28);
+box-shadow:0 8px 22px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.06);
+position:relative;
+overflow:hidden;
+}
+.delivery-notice::before{
+content:"";
+position:absolute;inset:-2px;
+background:linear-gradient(160deg,rgba(255,122,0,0.35),transparent 55%);
+opacity:.5;
+pointer-events:none;
+}
+.delivery-notice-icon{
+width:36px;height:36px;flex-shrink:0;
+border-radius:12px;
+display:flex;align-items:center;justify-content:center;
+font-size:18px;
+background:linear-gradient(135deg,var(--orange),#ff9d3d);
+box-shadow:0 4px 12px rgba(255,122,0,0.35);
+}
+.delivery-notice-text{display:flex;flex-direction:column;gap:4px;position:relative;z-index:1;}
+.delivery-notice-text strong{
+font-size:13px;
+letter-spacing:.3px;
+color:#fff;
+text-transform:uppercase;
+}
+.delivery-notice-text span{
+font-size:12.5px;
+line-height:1.55;
+color:rgba(255,255,255,0.75);
+}
+.delivery-notice-text b{color:var(--orange);font-weight:700;}
+
+.close{
+background:rgba(255,255,255,0.05);padding:12px;border-radius:15px;
+text-align:center;margin-bottom:20px;cursor:pointer;backdrop-filter:blur(5px);
+}
+
+.input{
+width:100%;padding:14px;margin:8px 0;
+border:none;border-radius:15px;
+background:rgba(255,255,255,0.05);color:#fff;
+border:1px solid rgba(255,255,255,0.1);transition:0.3s;
+}
+.input:focus{outline:none;background:rgba(255,255,255,0.1);border-color:var(--orange);}
+
+.btn{
+padding:14px;
+margin-top:10px;
+border-radius:15px;
+text-align:center;
+cursor:pointer;
+background:rgba(255,255,255,0.03);
+border:1px solid rgba(255,255,255,0.05);
+transition:0.4s;
+font-weight:500;
+backdrop-filter:blur(5px);
+}
+.btn:hover{background:var(--orange);transform:translateX(5px);border-color:transparent;}
+
+.delivery-strip{
+display:flex;
+align-items:center;
+justify-content:center;
+margin:14px 15px 0;
+padding:12px 16px;
+border-radius:16px;
+background:linear-gradient(145deg,rgba(255,122,0,0.10),rgba(255,255,255,0.03));
+border:1px solid rgba(255,122,0,0.20);
+cursor:pointer;
+transition:0.25s;
+}
+.delivery-strip:hover{background:linear-gradient(145deg,rgba(255,122,0,0.16),rgba(255,255,255,0.04));}
+.delivery-strip-eta{
+font-size:13px;
+font-weight:700;
+color:var(--orange);
+background:rgba(255,122,0,0.12);
+padding:6px 14px;
+border-radius:999px;
+flex-shrink:0;
+white-space:nowrap;
+}
+
+.search{padding:15px;}
+.search input{
+width:100%;padding:14px 16px 14px 44px;border:none;border-radius:16px;
+background:rgba(255,255,255,0.65);
+border:1px solid rgba(200,150,60,0.25);
+color:var(--ink);
+font-size:14.5px;
+background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='rgba(43,28,8,0.55)' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><circle cx='11' cy='11' r='8'></circle><line x1='21' y1='21' x2='16.65' y2='16.65'></line></svg>");
+background-repeat:no-repeat;
+background-position:16px center;
+transition:0.25s;
+box-shadow:0 4px 14px rgba(180,130,40,0.08);
+}
+.search input:focus{outline:none;background-color:rgba(255,255,255,0.85);border-color:var(--orange);}
+.search input::placeholder{color:var(--ink-faint);}
+
+.location-box{
+position:relative;
+margin-top:15px;
+display:flex;
+flex-direction:column;
+gap:10px;
+}
+
+.premium-location-input{
+width:100%;
+padding:16px 140px 16px 18px;
+border:none;
+border-radius:18px;
+background:linear-gradient(145deg,rgba(255,255,255,0.08),rgba(255,255,255,0.03));
+backdrop-filter:blur(12px);
+color:#fff;
+font-size:15px;
+box-shadow:0 10px 25px rgba(0,0,0,0.4),0 0 20px rgba(255,122,0,0.08);
+transition:0.3s;
+}
+
+.premium-location-input:focus{
+outline:none;
+transform:scale(1.02);
+box-shadow:0 0 25px rgba(255,122,0,0.4);
+}
+
+.location-buttons{
+display:flex;
+gap:10px;
+margin-top:10px;
+}
+
+.add-location-btn{
+flex:1;
+height:48px;
+border:none;
+border-radius:14px;
+background:linear-gradient(135deg,#ff7a00,#ff4d00);
+color:#fff;
+font-weight:bold;
+cursor:pointer;
+transition:0.3s;
+box-shadow:0 0 20px rgba(255,122,0,0.4);
+}
+
+.add-location-btn:hover{
+transform:translateY(-3px) scale(1.02);
+}
+
+.delete-location-btn{
+width:90px;
+border:none;
+border-radius:14px;
+background:rgba(255,255,255,0.08);
+color:#fff;
+cursor:pointer;
+transition:0.3s;
+backdrop-filter:blur(10px);
+}
+
+.delete-location-btn:hover{
+background:red;
+transform:translateY(-3px);
+}
+
+.categories{
+display:flex;
+gap:16px;
+overflow-x:auto;
+padding:16px 15px 20px;
+scroll-behavior:smooth;
+}
+
+.categories::-webkit-scrollbar{
+display:none;
+}
+
+.cat{
+flex-shrink:0;
+display:flex;
+flex-direction:column;
+justify-content:flex-start;
+align-items:center;
+gap:8px;
+cursor:pointer;
+transition:transform .2s ease;
+width:64px;
+}
+
+.cat:hover{
+transform:translateY(-2px);
+}
+
+.cat-icon{
+width:58px;
+height:58px;
+border-radius:20px;
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:26px;
+line-height:1;
+background:linear-gradient(150deg,rgba(255,255,255,0.75),rgba(255,255,255,0.45));
+border:1px solid rgba(200,150,60,0.22);
+box-shadow:0 6px 16px rgba(180,130,40,0.14), inset 0 1px 0 rgba(255,255,255,0.5);
+transition:0.25s ease;
+position:relative;
+}
+
+.cat.active .cat-icon{
+border-color:var(--orange);
+box-shadow:0 0 0 2px var(--orange), 0 8px 22px rgba(255,122,0,0.35);
+transform:scale(1.05);
+}
+
+.cat span{
+font-size:11.5px;
+font-weight:600;
+color:var(--ink-soft);
+text-align:center;
+line-height:1.2;
+white-space:nowrap;
+}
+
+.cat.active span{
+color:var(--ink);
+}
+
+.cat[data-cat="Restoranlar"] .cat-icon{background:linear-gradient(150deg,#ffb35e33,#ff7a0022);}
+.cat[data-cat="Market"] .cat-icon{background:linear-gradient(150deg,#8be0a833,#1fae5c22);}
+.cat[data-cat="İçkilər"] .cat-icon{background:linear-gradient(150deg,#7ad0ff33,#1c8ecb22);}
+.cat[data-cat="Alkoqol"] .cat-icon{background:linear-gradient(150deg,#e7a1ff33,#9a2fd622);}
+.cat[data-cat="Tütün"] .cat-icon{background:linear-gradient(150deg,#c9c9c933,#4d4d4d22);}
+.cat[data-cat="Aptek"] .cat-icon{background:linear-gradient(150deg,#8fe3d833,#0fa89122);}
+.cat[data-cat="Gül"] .cat-icon{background:linear-gradient(150deg,#ff9ebf33,#e8447e22);}
+.cat[data-cat="Hədiyyə"] .cat-icon{background:linear-gradient(150deg,#ffd76e33,#e0a30022);}
+.cat[data-cat="Zoo"] .cat-icon{background:linear-gradient(150deg,#ffcf8a33,#c9781422);}
+.cat[data-cat="Uşaq"] .cat-icon{background:linear-gradient(150deg,#9ecbff33,#2f6fd622);}
+.cat[data-cat="Baxım"] .cat-icon{background:linear-gradient(150deg,#ffb3d433,#d6317722);}
+.cat[data-cat="Geyim"] .cat-icon{background:linear-gradient(150deg,#c9b3ff33,#6a3fd622);}
+.cat[data-cat="Digər"] .cat-icon{background:linear-gradient(150deg,#e0e0e033,#6b6b6b22);}
+
+.grid{
+display:flex;
+flex-direction:column;
+gap:18px;
+padding:15px;
+transition: opacity 0.25s ease, transform 0.25s ease;
+color:var(--ink);
+}
+
+.chain-section{
+background:linear-gradient(145deg,rgba(255,255,255,0.7),rgba(255,255,255,0.45));
+border:1px solid rgba(200,150,60,0.18);
+/* 500 restoran olanda ekrandan kənarda olan bölmələri brauzer daxili render etmir
+   (Chrome/Edge/Android WebView dəstəkləyir), Safari/older üçün fallback normal işləyir.
+   Bu, uzun siyahını Wolt-tərzi rahat scroll edən edir, əlavə JS lazım olmadan. */
+content-visibility:auto;
+contain-intrinsic-size:auto 90px;
+border-radius:22px;
+overflow:hidden;
+backdrop-filter:blur(12px);
+transition:0.3s;
+box-shadow:0 6px 20px rgba(180,130,40,0.10);
+color:var(--ink);
+}
+
+.chain-header{
+display:flex;
+justify-content:space-between;
+align-items:center;
+padding:16px 18px;
+cursor:pointer;
+user-select:none;
+transition:0.25s;
+gap:12px;
+}
+.chain-header:hover{background:rgba(255,255,255,0.35);}
+.chain-header-left{display:flex;align-items:center;gap:14px;min-width:0;flex:1;}
+.chain-icon{
+width:68px;height:68px;border-radius:19px;flex-shrink:0;
+background:linear-gradient(135deg,var(--orange-hot),var(--orange-deep));
+display:flex;align-items:center;justify-content:center;
+font-size:26px;
+font-family:'Playfair Display',serif;
+font-weight:700;
+color:#ffe4bf;
+box-shadow:0 6px 18px rgba(0,0,0,0.45), 0 0 0 1px rgba(255,255,255,0.08) inset;
+border:1px solid rgba(255,255,255,0.1);
+overflow:hidden;
+}
+.chain-icon img{
+width:100%;
+height:100%;
+object-fit:cover;
+display:block;
+}
+.chain-name{
+font-family:'Playfair Display',serif;
+font-weight:700;
+font-size:17px;
+letter-spacing:0.3px;
+white-space:nowrap;
+overflow:hidden;
+text-overflow:ellipsis;
+color:var(--ink);
+}
+.chain-badges{
+display:flex;
+align-items:center;
+gap:7px;
+margin-top:6px;
+flex-wrap:wrap;
+}
+.chain-badge{
+display:flex;
+align-items:center;
+gap:3px;
+font-size:11.5px;
+font-weight:600;
+padding:3px 8px;
+border-radius:999px;
+white-space:nowrap;
+}
+.chain-badge.rating{
+background:rgba(255,193,7,0.22);
+color:#a66c00;
+}
+.chain-badge.eta{
+background:rgba(0,180,120,0.18);
+color:#0e8a5f;
+}
+.chain-badge.count{
+background:rgba(43,28,8,0.06);
+color:var(--ink-soft);
+}
+.chain-meta{font-size:12px;opacity:.65;margin-top:3px;}
+.chain-arrow{
+width:32px;height:32px;
+border-radius:50%;
+background:rgba(43,28,8,0.06);
+display:flex;align-items:center;justify-content:center;
+font-size:12px;
+opacity:.75;
+transition:transform 0.35s ease, background 0.25s ease;
+flex-shrink:0;
+}
+.chain-header.open .chain-arrow{transform:rotate(180deg);background:rgba(255,122,0,0.15);}
+
+.chain-products{
+display:flex;
+gap:14px;
+overflow-x:hidden;
+overflow-y:hidden;
+scroll-snap-type:x proximity;
+padding:0 16px 0 16px;
+max-height:0;
+opacity:0;
+pointer-events:none;
+transition:max-height .35s ease, opacity .25s ease, padding .35s ease;
+}
+.chain-products::-webkit-scrollbar{display:none;}
+.chain-products.open{
+max-height:420px;
+opacity:1;
+pointer-events:auto;
+overflow-x:auto;
+padding:0 16px 18px 16px;
+}
+
+.chain-card{
+min-width:150px;
+max-width:150px;
+scroll-snap-align:start;
+flex-shrink:0;
+}
+.card{
+background: rgba(255, 255, 255, 0.65);
+border: 1px solid rgba(200,150,60, 0.2);
+border-radius: 24px;
+position:relative;
+overflow:hidden;
+color:var(--ink);
+box-shadow:0 6px 18px rgba(180,130,40,0.10);
+}
+.card img{width:100%;height:120px;object-fit:cover; display:block; backface-visibility:hidden; transform:translate3d(0,0,0);}
+.card h3{padding:10px;}
+.card button{
+margin:10px;
+width:calc(100% - 20px);
+padding:10px;
+background:linear-gradient(135deg,var(--cta-red),var(--orange));
+border:none;
+border-radius:8px;
+cursor:pointer;
+position:relative;
+overflow:hidden;
+color:#fff;
+font-weight:700;
+}
+
+.cart{right:-100%;}
+.cart.active{right:0;}
+
+.product-modal{
+position:fixed;
+inset:0;
+background:rgba(0,0,0,0.7);
+backdrop-filter:blur(10px);
+display:flex;
+justify-content:center;
+align-items:center;
+z-index:99999;
+opacity:0;
+pointer-events:none;
+transition:0.4s;
+}
+
+.product-modal.active{
+opacity:1;
+pointer-events:auto;
+}
+
+.product-box{
+width:90%;
+max-width:420px;
+background:linear-gradient(145deg,#0a0a0a,#050505);
+border-radius:28px;
+overflow:hidden;
+box-shadow:0 20px 50px rgba(0,0,0,0.7);
+animation:modalShow .35s ease;
+max-height:85vh;
+overflow-y:auto;
+color:#f5ece0;
+}
+
+@keyframes modalShow{
+from{transform:scale(.8) translateY(40px);opacity:0;}
+to{transform:scale(1) translateY(0);opacity:1;}
+}
+
+.product-box img{
+width:100%;
+height:240px;
+object-fit:cover;
+}
+
+.product-content{
+padding:20px;
+}
+
+.close-modal{
+position:absolute;
+margin:15px;
+width:42px;
+height:42px;
+border-radius:50%;
+background:rgba(0,0,0,0.5);
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:18px;
+backdrop-filter:blur(10px);
+cursor:pointer;
+z-index:5;
+}
+
+.modal-rating{
+margin-top:8px;
+color:#ffd700;
+font-weight:bold;
+}
+
+.modal-desc{
+margin-top:15px;
+line-height:1.6;
+opacity:.7;
+font-size:14px;
+}
+
+.modal-price{
+margin-top:18px;
+font-size:26px;
+font-weight:bold;
+color:var(--orange);
+}
+
+.quantity-box{
+display:flex;
+align-items:center;
+gap:15px;
+margin-top:20px;
+}
+
+.quantity-box button{
+width:40px;
+height:40px;
+border:none;
+border-radius:12px;
+background:var(--orange);
+color:#fff;
+font-size:22px;
+cursor:pointer;
+}
+
+.modal-add{
+margin-top:25px;
+width:100%;
+padding:16px;
+border-radius:18px;
+background:linear-gradient(135deg,#ff7a00,#ff4d00);
+font-size:16px;
+font-weight:bold;
+color:#fff;
+cursor:pointer;
+box-shadow:0 0 25px rgba(255,122,0,0.4);
+transition:0.3s;
+}
+.modal-add:hover{
+transform:translateY(-2px) scale(1.02);
+}
+@keyframes ctaGlow{
+0%,100%{box-shadow:0 0 20px rgba(255,122,0,0.35);}
+50%{box-shadow:0 0 38px rgba(255,122,0,0.7);}
+}
+
+.card-info{
+padding:12px;
+position:relative;
+z-index:2;
+}
+
+.rating{
+margin-top:5px;
+font-size:14px;
+color:#b8860b;
+font-weight:bold;
+}
+
+.price{
+margin-top:6px;
+font-size:15.5px;
+font-weight:800;
+color:var(--price-gold);
+letter-spacing:.2px;
+}
+
+.fav-btn{
+position:absolute;
+top:12px;
+right:12px;
+width:38px;
+height:38px;
+border-radius:50%;
+background:rgba(0,0,0,0.5);
+backdrop-filter:blur(10px);
+display:flex;
+align-items:center;
+justify-content:center;
+font-size:20px;
+cursor:pointer;
+z-index:5;
+transition:0.3s;
+color: #fff;
+}
+
+.fav-btn:hover{
+transform:scale(1.15);
+}
+
+.fav-btn.active{
+background:red;
+color:#fff;
+box-shadow:0 0 20px red;
+animation:heartPop .4s ease;
+}
+
+@keyframes heartPop{
+0%{transform:scale(.5);}
+70%{transform:scale(1.3);}
+100%{transform:scale(1);}
+}
+
+.fab{
+position:fixed;bottom:20px;right:20px;
+width:60px;height:60px;border-radius:50%;
+background:linear-gradient(135deg,var(--orange-hot),var(--orange-deep));
+display:flex;align-items:center;justify-content:center;
+font-size:22px;cursor:pointer;
+z-index: 999;
+box-shadow:0 6px 20px rgba(0,0,0,0.5);
+transition:0.3s;
+}
+.fab:hover{
+transform:scale(1.06);
+}
+
+.notif-top{
+background:#0e0e0e;
+padding:12px;
+border-radius:12px;
+margin-bottom:10px;
+}
+
+::-webkit-scrollbar{
+height:6px;width:6px;
+}
+::-webkit-scrollbar-thumb{
+background:var(--orange);
+border-radius:10px;
+}
+
+.btn, .card button{
+transition:0.25s;
+-webkit-backface-visibility: hidden;
+backface-visibility: hidden;
+transform: translate3d(0, 0, 0);
+}
+.btn:active, .card button:active{
+transform:scale(0.95);
+}
+
+input:focus{
+outline:none;
+box-shadow:0 0 12px var(--orange);
+}
+
+.fade{
+animation:fade .35s ease;
+}
+@keyframes fade{
+from{opacity:0;transform:translateY(8px);}
+to{opacity:1;transform:translateY(0);}
+}
+
+body.light{
+--bg:#f4f4f4;
+--card:#ffffff;
+color:#000;
+}
+
+.grid{
+perspective:1000px;
+}
+
+.btn.primary, .card button{
+box-shadow:0 0 10px rgba(255,46,46,0.35), 0 0 10px rgba(255,87,34,0.35);
+}
+
+.btn.primary:hover, .card button:hover{
+box-shadow:0 0 24px rgba(255,46,46,0.75), 0 0 16px rgba(255,87,34,0.6);
+}
+
+@keyframes spin{
+100%{transform:rotate(360deg);}
+}
+
+.orbs div{
+position:fixed;
+width:420px;
+height:420px;
+border-radius:50%;
+filter:blur(160px) brightness(0.6);
+opacity:0.22;
+will-change: auto;
+transform: translate3d(0,0,0);
+z-index: -3;
+}
+
+.orbs div:nth-child(1){background:#ffe0a3;top:10%;left:10%;}
+.orbs div:nth-child(2){background:#fff3d6;top:50%;left:70%;animation-delay:8s;}
+.orbs div:nth-child(3){background:#ffd685;top:80%;left:30%;animation-delay:16s;}
+.orbs div:nth-child(4){display:none;}
+.orbs div:nth-child(5){display:none;}
+
+@keyframes float{
+0%{transform:translateY(0px);}
+50%{transform:translateY(-80px);}
+100%{transform:translateY(0px);}
+}
+
+#bg{
+position:fixed;
+top:0;
+left:0;
+width:100%;
+height:100%;
+z-index:-2;
+will-change: transform;
+transform: translate3d(0,0,0);
+}
+
+.cursor-glow{
+position:fixed;
+width:340px;
+height:340px;
+border-radius:50%;
+background:radial-gradient(circle, rgba(90,55,20,0.09), transparent 65%);
+pointer-events:none;
+transform:translate(-50%,-50%);
+z-index:0;
+}
+
+.premium-card-form{
+margin-top:20px;
+animation:fade .4s ease;
+}
+
+.live-card{
+width:100%;
+height:220px;
+border-radius:22px;
+padding:25px;
+position:relative;
+overflow:hidden;
+background:linear-gradient(135deg,rgba(255,122,0,0.9),rgba(255,80,0,0.7),rgba(0,0,0,0.9));
+box-shadow:0 15px 40px rgba(0,0,0,0.6),0 0 25px rgba(255,122,0,0.3);
+backdrop-filter:blur(10px);
+margin-bottom:20px;
+transform-style:preserve-3d;
+transition:0.4s;
+}
+
+.live-card:hover{
+transform:rotateY(6deg) rotateX(4deg);
+}
+
+.live-card::before{
+content:"";
+position:absolute;
+width:250px;
+height:250px;
+background:rgba(255,255,255,0.08);
+border-radius:50%;
+top:-120px;
+right:-60px;
+}
+
+.live-card::after{
+content:"";
+position:absolute;
+width:180px;
+height:180px;
+background:rgba(255,255,255,0.05);
+border-radius:50%;
+bottom:-90px;
+left:-60px;
+}
+
+.bank-name{
+font-size:18px;
+font-weight:bold;
+letter-spacing:2px;
+margin-bottom:30px;
+position:relative;
+z-index:2;
+}
+
+.chip{
+width:55px;
+height:40px;
+border-radius:10px;
+background:linear-gradient(135deg,#ffd700,#ffb700);
+margin-bottom:25px;
+position:relative;
+z-index:2;
+}
+
+.card-number{
+font-size:24px;
+letter-spacing:3px;
+font-weight:bold;
+margin-bottom:30px;
+position:relative;
+z-index:2;
+}
+
+.card-bottom{
+display:flex;
+justify-content:space-between;
+position:relative;
+z-index:2;
+}
+
+.card-bottom span{
+font-size:10px;
+opacity:0.7;
+}
+
+.card-bottom h4{
+margin-top:4px;
+font-size:15px;
+}
+
+.premiumInput{
+background:rgba(255,255,255,0.06);
+border:1px solid rgba(255,255,255,0.08);
+backdrop-filter:blur(10px);
+transition:0.3s;
+}
+
+.premiumInput:focus{
+border:1px solid var(--orange);
+box-shadow:0 0 20px rgba(255,122,0,0.4);
+transform:scale(1.02);
+}
+
+.premiumBtn{
+margin-top:15px;
+font-weight:bold;
+letter-spacing:1px;
+box-shadow:0 0 25px rgba(255,122,0,0.4);
+}
+
+.reveal{
+opacity:0;
+transform:translateY(40px);
+transition:0.6s ease;
+}
+
+.reveal.active{
+opacity:1;
+transform:translateY(0);
+}
+
+.logo{
+user-select:none;
+}
+
+.lightning{
+font-size:28px;
+margin-right:8px;
+color:#ffd000;
+text-shadow:0 0 5px #ff7a00,0 0 10px #ff7a00,0 0 20px #ffae00,0 0 35px #ff7a00;
+}
+
+@keyframes lightningFlash{
+0%{transform:scale(1) rotate(-8deg);opacity:1;}
+50%{transform:scale(1.15) rotate(8deg);opacity:.8;}
+100%{transform:scale(1) rotate(-8deg);opacity:1;}
+}
+  
+.icon svg {
+  width: 24px;
+  height: 24px;
+  stroke-width: 1.5;
+  filter: drop-shadow(0 0 5px rgba(255,122,0, 0.5));
+  transition: 0.3s;
+}
+.icon:hover svg {
+  transform: scale(1.2);
+  stroke: var(--orange);
+}
+
+header {
+    background: rgba(255, 250, 235, 0.78);
+    backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(200,150,60,0.20);
+}
+
+.error-text{color:#ff4d4d;font-size:12px;margin:-4px 0 6px 4px;display:none;}
+.error-text.show{display:block;}
+.input.invalid{border-color:#ff4d4d !important;box-shadow:0 0 10px rgba(255,77,77,0.4);}
+.stars-input{display:flex;gap:6px;font-size:26px;cursor:pointer;margin:10px 0;}
+.stars-input span{opacity:.35;transition:.2s;}
+.stars-input span.active{opacity:1;text-shadow:0 0 8px var(--orange);}
+.review-item{background:#0e0e0e;padding:12px;border-radius:12px;margin-top:10px;}
+.link-btn{background:none;border:none;color:var(--orange);text-decoration:underline;cursor:pointer;font-size:13px;padding:0;}
+.small-note{font-size:12px;opacity:.55;margin-top:6px;line-height:1.5;}
+.help-section h4{margin-top:14px;color:var(--orange);}
+.help-section p{font-size:13px;line-height:1.6;opacity:.8;margin-top:6px;}
+
+.auth-box{
+background:linear-gradient(160deg,#141414,#0a0a0a);
+border:1px solid rgba(255,255,255,0.08);
+box-shadow:0 25px 60px rgba(0,0,0,0.6),0 0 40px rgba(255,122,0,0.08);
+position:relative;
+overflow:hidden;
+}
+.auth-box::before{
+content:"";
+position:absolute;
+top:-80px;left:-80px;
+width:200px;height:200px;
+background:radial-gradient(circle,rgba(255,122,0,0.25),transparent 70%);
+filter:blur(10px);
+pointer-events:none;
+}
+.auth-title{
+text-align:center;font-size:20px;font-weight:800;margin-bottom:4px;
+background:linear-gradient(90deg,#fff,#ffcf9e);
+-webkit-background-clip:text;background-clip:text;color:transparent;
+}
+.auth-sub{text-align:center;font-size:12px;opacity:.55;margin-bottom:18px;}
+.divider{
+display:flex;align-items:center;gap:10px;margin:16px 0;
+font-size:11px;opacity:.4;text-transform:uppercase;letter-spacing:1px;
+}
+.divider::before,.divider::after{content:"";flex:1;height:1px;background:rgba(255,255,255,0.1);}
+
+.social-btn{
+width:100%;padding:13px;margin-top:10px;border-radius:14px;
+display:flex;align-items:center;justify-content:center;gap:10px;
+font-weight:600;font-size:14px;cursor:pointer;
+border:1px solid rgba(255,255,255,0.1);
+transition:0.3s;
+position:relative;
+}
+.social-btn svg{width:19px;height:19px;flex-shrink:0;}
+.social-btn.google{
+background:#fff;color:#1f1f1f;
+}
+.social-btn.google:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(255,255,255,0.15);}
+.social-btn.apple{
+background:#000;color:#fff;border-color:rgba(255,255,255,0.25);
+}
+.social-btn.apple:hover{transform:translateY(-2px);box-shadow:0 8px 20px rgba(255,255,255,0.1);}
+.social-btn.loading{opacity:.6;pointer-events:none;}
+.social-btn .spin-mini{
+width:16px;height:16px;border:2px solid rgba(0,0,0,0.2);border-top:2px solid #1f1f1f;
+border-radius:50%;animation:spin .8s linear infinite;
+}
+.social-btn.apple .spin-mini{border:2px solid rgba(255,255,255,0.25);border-top:2px solid #fff;}
+
+.pw-modal{
+position:fixed;inset:0;background:rgba(0,0,0,0.8);backdrop-filter:blur(10px);
+display:none;justify-content:center;align-items:center;z-index:100000;
+padding:20px;
+}
+.pw-modal.active{display:flex;animation:fade .3s ease;}
+.pw-box{
+position:relative;
+background:linear-gradient(160deg,#161616,#0a0a0a 60%,#120a04);
+border:1px solid rgba(255,122,0,0.25);
+border-radius:24px;padding:30px 24px;width:100%;max-width:340px;
+box-shadow:0 25px 70px rgba(0,0,0,0.7),0 0 40px rgba(255,122,0,0.15),inset 0 1px 0 rgba(255,255,255,0.05);
+text-align:center;
+overflow:hidden;
+color:#fff;
+}
+.pw-box::before{
+content:"";
+position:absolute;inset:-2px;
+background:linear-gradient(160deg,rgba(255,122,0,0.4),rgba(0,0,0,0),rgba(255,122,0,0.15));
+z-index:-1;
+border-radius:24px;
+}
+.pw-box .pw-icon{
+font-size:34px;width:64px;height:64px;margin:0 auto 14px;
+display:flex;align-items:center;justify-content:center;border-radius:50%;
+background:radial-gradient(circle,rgba(255,122,0,0.25),rgba(255,122,0,0.05));
+border:1px solid rgba(255,122,0,0.35);
+box-shadow:0 0 25px rgba(255,122,0,0.2);
+}
+.pw-box h3{font-size:19px;margin-bottom:8px;color:#fff;font-weight:700;letter-spacing:.2px;}
+.pw-box p{font-size:13px;opacity:.7;line-height:1.55;margin-bottom:18px;color:#fff;}
+.pw-box .input{color:#fff;text-align:center;}
+.pw-box .input::placeholder{color:rgba(255,255,255,0.4);}
+.pw-box .btn.primary{
+background:linear-gradient(135deg,var(--orange),#ff9d3d);
+color:#000;font-weight:700;border:none;box-shadow:0 8px 20px rgba(255,122,0,0.25);
+}
+.pw-box #pwSuccessText{color:#fff;}
+.pw-success{display:none;}
+.pw-success.show{display:block;}
+.pw-form.hide{display:none;}
+.mini-map{width:100%;height:200px;border-radius:16px;margin-top:10px;overflow:hidden;}
+#paymentPanel .btn.primary{position:relative;transition:0.25s;}
+#paymentPanel .btn.primary.pay-selected{
+background:linear-gradient(135deg,var(--orange),#ff9d3d)!important;
+color:#000!important;font-weight:700;
+box-shadow:0 8px 20px rgba(255,122,0,0.3);
+border:1px solid rgba(255,255,255,0.3);
+}
+#paymentPanel .btn.primary.pay-selected::after{
+content:"✓ Seçilib";
+position:absolute;right:14px;top:50%;transform:translateY(-50%);
+font-size:11px;font-weight:700;
+}
+.map-hint{font-size:12px;opacity:.6;margin-top:6px;line-height:1.5;}
+.notif-item{background:#0e0e0e;padding:12px;border-radius:12px;margin-bottom:10px;position:relative;}
+.notif-item.unread{border:1px solid var(--orange);}
+.notif-item .notif-time{font-size:11px;opacity:.5;margin-top:5px;}
+</style>
+</head>
+
+<body>
+<div id="bgGradient"></div>
+<div class="cursor-glow"></div>
+<canvas id="bg"></canvas>
+<div class="orbs">
+  <div></div>
+  <div></div>
+  <div></div>
+  <div></div>
+  <div></div>
+</div>
+<div id="splash"><h1>⚡ BAKUGO</h1></div>
+
+<div id="loader" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);backdrop-filter:blur(8px);display:none;justify-content:center;align-items:center;z-index:999999;">
+  <div style="width:70px;height:70px;border:5px solid #222;border-top:5px solid var(--orange);border-radius:50%;animation:spin 1s linear infinite;"></div>
+</div>
+
+<div id="auth" style="display:none;">
+  <div class="auth-box">
+    <div class="auth-title">⚡ BAKUGO</div>
+    <div class="auth-sub" id="authSub">Sürətli çatdırılma, bir toxunuşda</div>
+    <div id="authMenu">
+      <button class="social-btn google" id="googleBtn" onclick="googleLogin()">
+        <svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6 29.6 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.2-5.1l-6.6-5.4C29.5 35.4 26.9 36 24 36c-5.2 0-9.6-3.3-11.2-7.9l-6.6 5.1C9.6 39.6 16.3 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.3-4.1 5.8l6.6 5.4C39.9 37.1 44 31.1 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
+        <span id="googleBtnText">Google ilə davam et</span>
+      </button>
+      <button class="social-btn apple" id="appleBtn" onclick="appleLogin()">
+        <svg viewBox="0 0 384 512" fill="currentColor"><path d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141 0 184.8 0 273.5c0 26.2 4.8 53.3 14.4 81.2 12.8 37.5 59 129.3 107.2 127.6 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-84.1 102.6-121.7-65.2-30.7-57.7-90-57.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"/></svg>
+        <span id="appleBtnText">Apple ilə davam et</span>
+      </button>
+      <div class="divider">və ya</div>
+      <button class="btn primary" onclick="openLogin()">🔑 Email ilə daxil ol</button>
+      <button class="btn primary" onclick="openRegister()">📝 Qeydiyyat</button>
+    </div>
+    <div id="loginBox" style="display:none;">
+      <input id="loginEmail" placeholder="Gmail">
+      <input id="loginPass" type="password" placeholder="Şifrə">
+      <button class="btn primary" onclick="loginUser()">Daxil ol</button>
+      <button class="link-btn" style="margin-top:12px;display:block;text-align:center;width:100%;color:var(--orange);font-weight:600;font-size:14px;text-decoration:underline;opacity:1;visibility:visible;background:transparent;border:none;box-shadow:none;" onclick="openForgotPassword()">🔑 Şifrəni unutmusunuz?</button>
+      <button class="btn" onclick="backAuth()">⬅ Geri</button>
+    </div>
+    <div id="registerBox" style="display:none;">
+      <input id="regName" placeholder="Ad">
+      <input id="regSurname" placeholder="Soyad">
+      <input id="regPhone" placeholder="+994XXXXXXXXX">
+      <div class="error-text" id="regPhoneErr">Telefon formatı: +994XXXXXXXXX</div>
+      <input id="regEmail" placeholder="Gmail">
+      <div class="error-text" id="regEmailErr">Düzgün email daxil edin</div>
+      <input id="regPass" type="password" placeholder="Şifrə (min 6 simvol)">
+      <div class="error-text" id="regPassErr">Şifrə minimum 6 simvol olmalıdır</div>
+      <button class="btn primary" onclick="registerUser()">Qeydiyyat</button>
+      <button class="btn" onclick="backAuth()">⬅ Geri</button>
+    </div>
+  </div>
+</div>
+
+<div id="ageVerifyModal" class="pw-modal">
+  <div class="pw-box">
+    <div class="pw-form">
+      <div class="pw-icon">🔞</div>
+      <h3>Yaş təsdiqi tələb olunur</h3>
+      <p>Bu məhsul (tütün/alkoqol) yalnız <strong>18 yaşdan yuxarı</strong> şəxslər üçündür. Zəhmət olmasa yaşınızı təsdiq edin.</p>
+      <button class="btn primary" onclick="confirmAgeVerification(true)">✅ 18 yaşımdan böyüyəm</button>
+      <button class="btn" onclick="confirmAgeVerification(false)">⬅ Xeyr, geri qayıt</button>
+    </div>
+  </div>
+</div>
+
+<div id="pwModal" class="pw-modal">
+  <div class="pw-box">
+    <div id="pwForm" class="pw-form">
+      <div class="pw-icon">🔒</div>
+      <h3>Şifrəni sıfırla</h3>
+      <p>Qeydiyyatdan keçdiyiniz email ünvanını daxil edin, sıfırlama linki göndərək.</p>
+      <input class="input" id="pwResetEmail" placeholder="Gmail">
+      <div class="error-text" id="pwResetErr">Düzgün email daxil edin</div>
+      <button class="btn primary" id="pwSendBtn" onclick="sendResetLink()">Link göndər</button>
+      <button class="btn" onclick="closeForgotPassword()">⬅ Geri</button>
+    </div>
+    <div id="pwSuccess" class="pw-success">
+      <div class="pw-icon">📧</div>
+      <h3>Link göndərildi!</h3>
+      <p id="pwSuccessText">Email qutunuzu yoxlayın və linkə klikləyərək yeni şifrə təyin edin.</p>
+      <button class="btn primary" onclick="closeForgotPassword()">Bağla</button>
+    </div>
+  </div>
+</div>
+
+<header>
+  <div class="logo fire-logo">
+    <div class="lightning">⚡</div>
+    <span>B</span><span>A</span><span>K</span><span>U</span><span>G</span><span>O</span>
+  </div>
+  <div class="header-icons">
+    <div class="icon" onclick="toggleMenu()">☰<div class="badge" id="menuBadge" style="display:none;">0</div></div>
+    <div class="icon" onclick="toggleNotif()">🔔<div class="badge" id="count">0</div></div>
+    <div class="icon" onclick="toggleAccount()">👤</div>
+  </div>
+</header>
+
+<div id="menu" class="panel left">
+  <div class="close" onclick="toggleMenu()">⬅ Geri</div>
+  <div class="location-box">
+    <div style="display:flex; gap:5px; align-items:center;">
+        <input class="premium-location-input" id="location" placeholder="📍 Ünvanı daxil edin">
+        <button class="add-location-btn" style="width:50px; flex:none;" onclick="getCurrentLocation()">📍</button>
+    </div>
+    <div id="locationMap" class="mini-map"></div>
+    <div class="map-hint">📌 Markeri sürükləyərək dəqiq ünvanınızı seçin</div>
+    <div class="location-buttons">
+      <button class="add-location-btn" onclick="saveLocation()">Yadda saxla</button>
+      <button class="delete-location-btn" onclick="deleteLocation()">🗑 Sil</button>
+    </div>
+  </div>
+  <div class="btn primary" onclick="toggleTracking()">📦 Sifarişlər (İzləmə)</div>
+  <div class="btn primary" onclick="toggleOrdersHistory()">🕓 Əvvəlki sifarişlər</div>
+  <div class="btn primary" style="position:relative;" onclick="toggleCampaigns()">🎁 Kampaniyalar<div class="badge" id="campaignsMenuBadge" style="display:none;top:-8px;right:-8px;">0</div></div>
+  <div class="btn primary" onclick="toggleFavorites()">❤️ Favorilər</div>
+  <div class="btn primary" onclick="togglePayment()">💳 Ödəmə sistemi</div>
+  <div class="btn primary" onclick="toggleTheme()">🎨 Tema</div>
+  <div class="btn primary" onclick="togglePrivacy()">🔒 Məxfilik</div>
+  <div class="btn primary" onclick="toggleSupport()">🛟 Dəstək</div>
+</div>
+
+<div id="account" class="panel left">
+  <div style="text-align:center;margin-bottom:15px;">
+    <img id="profilePic" src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100' height='100'%3E%3Crect width='100' height='100' fill='%23e0e0e0'/%3E%3Ccircle cx='50' cy='38' r='18' fill='%23aaaaaa'/%3E%3Cellipse cx='50' cy='92' rx='32' ry='26' fill='%23aaaaaa'/%3E%3C/svg%3E" style="width:100px;height:100px;border-radius:50%;object-fit:cover;cursor:pointer;" onclick="document.getElementById('fileInput').click()">
+    <input type="file" id="fileInput" style="display:none" accept="image/*" onchange="uploadPhoto(event)">
+  </div>
+  <div class="close" onclick="toggleAccount()">⬅ Geri</div>
+  <input class="input" id="name" placeholder="Ad" onchange="saveUser()">
+  <input class="input" id="surnameInput" placeholder="Soyad" onchange="saveUser()">
+  <input class="input" id="phoneInput" placeholder="+994 ..." onchange="saveUser()">
+  <div class="error-text" id="phoneInputErr">Telefon formatı: +994XXXXXXXXX</div>
+  <input class="input" id="mailInput" placeholder="@gmail.com" onchange="saveUser()">
+  <div class="error-text" id="mailInputErr">Düzgün email daxil edin</div>
+  <div class="btn primary" onclick="save()">Yadda saxla</div>
+  <div class="btn primary" style="background:#0e0e0e;border:1px solid var(--orange);color:var(--orange);" onclick="accountResetPassword()">🔑 Şifrəni sıfırla</div>
+  <div class="btn danger" onclick="logout()">Çıxış</div>
+  <div class="btn danger" style="margin-top:8px;opacity:.85;" onclick="openDeleteAccount()">🗑️ Hesabı sil</div>
+</div>
+
+<div id="notif" class="panel right">
+  <div class="close" onclick="toggleNotif()">⬅ Geri</div>
+  <h3>🔔 Bildirişlər</h3>
+  <div id="notifList" style="margin-top:15px;"></div>
+</div>
+
+<div class="delivery-strip" id="deliveryStripBox" onclick="toggleTracking()">
+  <div class="delivery-strip-eta" id="deliveryStripEta" style="margin:0 auto;">⏱ 15-35 dəq</div>
+</div>
+
+<div class="search">
+  <input id="search" placeholder="Yemək axtar (bütün kateqoriyalar)...">
+</div>
+
+<div class="categories">
+  <div class="cat active" data-cat="Restoranlar" onclick="selectCategory('Restoranlar')"><div class="cat-icon">🍔</div><span>Restoranlar</span></div>
+  <div class="cat" data-cat="Market" onclick="selectCategory('Market')"><div class="cat-icon">🛒</div><span>Market</span></div>
+  <div class="cat" data-cat="İçkilər" onclick="selectCategory('İçkilər')"><div class="cat-icon">🥤</div><span>İçkilər</span></div>
+  <div class="cat" data-cat="Alkoqol" onclick="selectCategory('Alkoqol')"><div class="cat-icon">🍷</div><span>Alkoqol 🔞</span></div>
+  <div class="cat" data-cat="Tütün" onclick="selectCategory('Tütün')"><div class="cat-icon">🚬</div><span>Tütün 🔞</span></div>
+  <div class="cat" data-cat="Aptek" onclick="selectCategory('Aptek')"><div class="cat-icon">💊</div><span>Aptek</span></div>
+  <div class="cat" data-cat="Gül" onclick="selectCategory('Gül')"><div class="cat-icon">💐</div><span>Gül</span></div>
+  <div class="cat" data-cat="Hədiyyə" onclick="selectCategory('Hədiyyə')"><div class="cat-icon">🎁</div><span>Hədiyyə</span></div>
+  <div class="cat" data-cat="Zoo" onclick="selectCategory('Zoo')"><div class="cat-icon">🐶</div><span>Zoo</span></div>
+  <div class="cat" data-cat="Uşaq" onclick="selectCategory('Uşaq')"><div class="cat-icon">👶</div><span>Uşaq</span></div>
+  <div class="cat" data-cat="Baxım" onclick="selectCategory('Baxım')"><div class="cat-icon">💄</div><span>Baxım</span></div>
+  <div class="cat" data-cat="Geyim" onclick="selectCategory('Geyim')"><div class="cat-icon">👕</div><span>Geyim</span></div>
+  <div class="cat" data-cat="Digər" onclick="selectCategory('Digər')"><div class="cat-icon">✨</div><span>Digər</span></div>
+</div>
+
+<div class="grid" id="grid"></div>
+
+<div id="productModal" class="product-modal">
+  <div class="product-box">
+    <div class="close-modal" onclick="closeProduct()">✖</div>
+    <img id="modalImg" src="">
+    <div class="product-content">
+      <h2 id="modalName"></h2>
+      <div class="modal-rating" id="modalRating"></div>
+      <p class="modal-desc">🔥 Premium dad və xüsusi resept. Təzə hazırlanır və sürətli çatdırılır.</p>
+      <div class="modal-price" id="modalPrice"></div>
+      <div class="quantity-box">
+        <button onclick="changeQty(-1)">−</button>
+        <span id="qty">1</span>
+        <button onclick="changeQty(1)">+</button>
+      </div>
+      <button class="modal-add" onclick="addModalToCart()">🛒 Səbətə əlavə et</button>
+
+      <div style="margin-top:25px;border-top:1px solid rgba(255,255,255,0.08);padding-top:15px;">
+        <h3 style="font-size:15px;">⭐ Rəylər</h3>
+        <div id="modalReviews"></div>
+        <div id="reviewFormBox" style="margin-top:12px;">
+          <div class="stars-input" id="reviewStars">
+            <span data-v="1">★</span><span data-v="2">★</span><span data-v="3">★</span><span data-v="4">★</span><span data-v="5">★</span>
+          </div>
+          <textarea id="reviewText" class="input" rows="2" placeholder="Rəyinizi yazın..."></textarea>
+          <div class="btn primary" onclick="submitReview()">Rəyi göndər</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div id="cart" class="panel right">
+  <div class="btn primary" id="orderBtn" onclick="orderNow()">🚀 Sifariş et</div>
+  <div id="addressNoteSection" style="margin:10px 0 6px;">
+    <div id="addressNoteEdit">
+      <label style="font-size:13px;opacity:.75;display:block;margin-bottom:6px;">🏠 Ev / Mənzil / Blok nömrəsi <span style="color:var(--orange);">(məcburidir)</span></label>
+      <textarea id="addressNoteInput" class="input" rows="2" placeholder="Məs: 5-ci blok, 12-ci mərtəbə, 45-ci mənzil"></textarea>
+      <div class="error-text" id="addressNoteErr">Sifariş vermək üçün bu sahəni doldurmalısınız</div>
+      <button class="btn primary" style="width:100%;margin-top:4px;" onclick="saveAddressNote()">💾 Yadda saxla</button>
+    </div>
+    <div id="addressNoteView" style="display:none;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:15px;padding:12px 14px;">
+      <div style="font-size:12px;opacity:.6;margin-bottom:4px;">🏠 Ev / Mənzil / Blok qeydi</div>
+      <div id="addressNoteText" style="font-size:14px;line-height:1.4;"></div>
+      <button class="link-btn" style="margin-top:8px;font-weight:600;" onclick="editAddressNote()">✏️ Redaktə et</button>
+    </div>
+  </div>
+  <div class="close" onclick="toggleCart()">⬅ Geri</div>
+  <h3>Səbət</h3>
+  <div class="delivery-notice">
+    <div class="delivery-notice-icon">🚚</div>
+    <div class="delivery-notice-text">
+      <strong>Çatdırılma haqqı</strong>
+      <span>12 AZN-dən aşağı sifarişlərdə <b>4 AZN</b>, 12 AZN və yuxarı sifarişlərdə isə <b>2.5 AZN</b> çatdırılma haqqı tətbiq olunur.</span>
+    </div>
+  </div>
+  <div id="cartItems">
+    <div id="emptyCart" style="text-align:center;padding:30px;opacity:.6;font-size:18px;">🛒 Səbət boşdur</div>
+  </div>
+  <div id="cartBreakdown" style="margin-top:10px;font-size:13px;opacity:.8;"></div>
+  <div id="total">0 AZN</div>
+</div>
+
+<div id="favoritesPanel" class="panel right">
+  <div class="close" onclick="toggleFavorites()">⬅ Geri</div>
+  <h3>❤️ Favorilər</h3>
+  <div id="favoritesList"></div>
+</div>
+
+<div id="ordersHistoryPanel" class="panel right">
+  <div class="close" onclick="toggleOrdersHistory()">⬅ Geri</div>
+  <h3>🕓 Əvvəlki Sifarişlər</h3>
+  <div id="historyList" style="margin-top:15px;"></div>
+</div>
+
+<div id="campaignsPanel" class="panel right">
+  <div class="close" onclick="toggleCampaigns()">⬅ Geri</div>
+  <h3>🎁 Kampaniyalar və Kuponlar</h3>
+  <div id="promoCodesList" style="margin-top:15px;">
+    <div style="text-align:center;opacity:.6;padding:20px 0;">Yüklənir...</div>
+  </div>
+  <div class="notif-top" style="margin-top:15px;">
+    <input type="text" id="couponInput" class="input" placeholder="Kupon kodunu daxil edin">
+    <button class="btn primary" style="width:100%" onclick="applyCoupon()">Kuponu Aktiv Et</button>
+  </div>
+</div>
+
+<div class="fab" onclick="toggleCart()">
+  🛒
+  <div id="cartCount" style="position:absolute;top:-5px;right:-5px;width:24px;height:24px;border-radius:50%;background:red;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:bold;">0</div>
+</div>
+
+<div id="paymentPanel" class="panel left">
+  <div class="close" onclick="togglePayment()">⬅ Geri</div>
+  <h3>💳 Ödəmə üsulu</h3>
+  <div class="btn primary" id="payOptCash" onclick="selectPayment('cash')">💵 Nağd</div>
+  <div class="btn primary" id="payOptCard" onclick="selectPayment('card')">💳 Kart</div>
+  <div class="btn primary" id="payOptGpay" style="opacity:.45;cursor:not-allowed;" onclick="if(window.showToast) window.showToast('⏳ Google Pay tezliklə aktiv olacaq'); else alert('Google Pay tezliklə aktiv olacaq');">📱 Google Pay <span style="font-size:11px;opacity:.8;">(tezliklə)</span></div>
+
+  <div id="cardForm" class="premium-card-form" style="display:none;">
+    <div class="live-card">
+      <div class="bank-name" id="bankName">BANK</div>
+      <div class="chip"></div>
+      <div class="card-number" id="liveNumber">#### #### #### ####</div>
+      <div class="card-bottom">
+        <div>
+          <span>KART SAHİBİ</span>
+          <h4 id="liveName">AD SOYAD</h4>
+        </div>
+        <div>
+          <span>SON TARİX</span>
+          <h4 id="liveExpiry">MM/YY</h4>
+        </div>
+      </div>
+    </div>
+    <input class="input premiumInput" id="cardHolder" placeholder="Ad Soyad">
+    <input class="input premiumInput" id="cardNumber" maxlength="19" placeholder="Kart nömrəsi">
+    <div class="error-text" id="cardNumberErr">Kart nömrəsi düzgün deyil</div>
+    <div style="display:flex;gap:10px;">
+      <input class="input premiumInput" id="expiry" maxlength="5" placeholder="MM/YY">
+      <input class="input premiumInput" id="cvc" maxlength="3" placeholder="CVC">
+    </div>
+    <div class="error-text" id="cardExtraErr">Son tarix/CVC düzgün deyil</div>
+    <div class="btn primary premiumBtn" onclick="saveCard()">💳 Kart əlavə et</div>
+  </div>
+</div>
+
+<div id="themePanel" class="panel left">
+  <div class="close" onclick="toggleTheme()">⬅ Geri</div>
+  <h3>🎨 Tema</h3>
+  <div style="font-size:13px;opacity:.7;margin:4px 0 6px;">Rejim</div>
+  <div style="display:flex;gap:10px;">
+    <div class="btn" id="lightModeBtn" style="flex:1;margin-top:0;" onclick="setMode('light')">☀️ Açıq</div>
+    <div class="btn" id="darkModeBtn" style="flex:1;margin-top:0;" onclick="setMode('dark')">🌙 Tünd</div>
+  </div>
+</div>
+
+<div id="privacyPanel" class="panel left">
+  <div class="close" onclick="togglePrivacy()">⬅ Geri</div>
+  <h3 style="margin-bottom:20px;font-size:24px;color:var(--orange);">🔒 Məxfilik və İstifadə Şərtləri</h3>
+
+  <div class="notif-top">
+    <h4>1. Şərtlərin qəbulu</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">BAKUGO tətbiqini yükləməklə, qeydiyyatdan keçməklə və ya istifadə etməklə siz bu şərtləri tam qəbul etmiş sayılırsınız. Tətbiq yalnız qanuni məqsədlər üçün istifadə oluna bilər.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>2. Xidmətin təsviri</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">BAKUGO restoran və mağazalardan sifariş vermək və çatdırılma xidmətindən istifadə etmək imkanı verən platformadır. BAKUGO çatdırılmanı bilavasitə həyata keçirən tərəf deyil, sifarişi restoran/mağaza və kuryer arasında əlaqələndirən vasitəçidir.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>3. Hansı məlumatları toplayırıq</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">Ad, soyad, telefon nömrəsi, email, çatdırılma ünvanı və GPS koordinatları, profil şəkli, sifariş və səbət tarixçəsi, favorilər, rəylər və dəstək yazışmaları. Bu məlumatlar yalnız sifarişin icrası, çatdırılma və dəstək xidməti üçün istifadə olunur.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>4. Hesab yaradılması və öhdəliklər</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">Qeydiyyat zamanı təqdim etdiyiniz məlumatların doğru olmasına və hesab təhlükəsizliyinizə (şifrə və s.) görə siz məsuliyyət daşıyırsınız. Yalan sifariş, spam və sistemin sui-istifadəsindən çəkinməlisiniz.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>5. Sifariş və ödəniş</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">Sifariş verməklə göstərilən qiymətə əsasən ödəniş öhdəliyi götürürsünüz. Ödəniş nağd və ya bank kartı ilə edilə bilər; kart məlumatları tətbiqdə saxlanılmır — lisenziyalı ödəniş provayderi tərəfindən təhlükəsiz emal olunur. Sifariş "Hazırlanır" statusunda ikən ləğv edilə bilər, kuryer qəbul etdikdən sonra ləğvetmə məhdud ola bilər.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>6. Saxlama və üçüncü tərəflər</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">Məlumatlar Google Firebase infrastrukturunda şifrələnmiş şəkildə saxlanılır. Məlumatlar heç bir marketinq məqsədilə üçüncü tərəflərə satılmır; yalnız sifarişin icrası üçün restoran/kuryer tərəfi ilə paylaşılır.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>7. Məsuliyyətin məhdudlaşdırılması</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">BAKUGO gecikmə və ya çatdırılma zamanı yaranan problemlərə görə mümkün qədər dəstək göstərməyə çalışır, lakin restoran/mağaza tərəfindən hazırlanan məhsulun keyfiyyətinə görə birbaşa məsuliyyət daşımır.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>8. Uşaqların məxfiliyi</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">Tətbiq 18 yaşdan aşağı şəxslər üçün nəzərdə tutulmayıb və şüurlu şəkildə uşaqlardan məlumat toplamır.</p>
+  </div>
+
+  <div class="notif-top">
+    <h4>⚖️ Sizin hüquqlarınız</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">İstənilən vaxt profil məlumatlarınızı "Hesabım" bölməsindən dəyişə, dəstək vasitəsilə məlumatlarınızın surətini tələb edə və ya aşağıdakı düymə ilə hesabınızı və şəxsi məlumatlarınızı tam silə bilərsiniz. Silinmə əməliyyatı geri qaytarılmır.</p>
+  </div>
+
+  <div class="btn danger" style="margin-top:10px;" onclick="openDeleteAccount()">🗑️ Hesabı və məlumatları sil</div>
+
+  <div class="notif-top" style="margin-top:15px;">
+    <h4>✉️ Əlaqə</h4>
+    <p style="margin-top:10px;font-size:13px;line-height:1.6;opacity:.8;">Məxfilik və şərtlərlə bağlı suallarınız üçün:</p>
+    <p style="margin-top:8px;font-size:13px;line-height:1.6;"><a href="tel:+994702484852" style="color:var(--orange);text-decoration:none;">📞 +994 70 248 48 52</a></p>
+    <p style="margin-top:4px;font-size:13px;line-height:1.6;"><a href="https://wa.me/994702484852" target="_blank" style="color:var(--orange);text-decoration:none;">🟢 WhatsApp: +994 70 248 48 52</a></p>
+  </div>
+
+  <p style="margin-top:15px;font-size:11px;opacity:.5;text-align:center;">Son yenilənmə: 8 avqust 2026</p>
+</div>
+
+<div id="deleteAccountModal" class="pw-modal">
+  <div class="pw-box">
+    <div id="deleteAccountForm" class="pw-form">
+      <div class="pw-icon">⚠️</div>
+      <h3>Hesabı silmək istəyirsiniz?</h3>
+      <p>Bu əməliyyat geri qaytarıla bilməz. Profiliniz, səbətiniz, favoriləriniz və hesab girişiniz tamamilə silinəcək.</p>
+      <input class="input" id="deleteAccountPassword" type="password" placeholder="Şifrənizi təsdiq üçün daxil edin" style="display:none;">
+      <div class="error-text" id="deleteAccountErr">Xəta baş verdi, yenidən cəhd edin</div>
+      <button class="btn danger" id="deleteAccountBtn" onclick="confirmDeleteAccount()">🗑️ Bəli, hesabımı sil</button>
+      <button class="btn" onclick="closeDeleteAccount()">⬅ İmtina et</button>
+    </div>
+  </div>
+</div>
+
+<div id="supportPanel" class="panel left">
+  <div class="close" onclick="toggleSupport()">⬅ Geri</div>
+  <h3>🛟 Dəstək</h3>
+  <div class="btn primary" onclick="openChat()">💬 Çat</div>
+  <div class="btn primary" onclick="callSupport()">📞 Zənglə əlaqə</div>
+  <div class="btn primary" onclick="openWhatsApp()">🟢 WhatsApp</div>
+  <div class="btn primary" onclick="openHelp()">📚 Məlumat mərkəzi</div>
+</div>
+
+<div id="chatPanel" class="panel right">
+  <div class="close" onclick="openChat()">⬅ Geri</div>
+  <h3>🤖 BAKUGO AI Dəstək</h3>
+  <div id="chatMessages" style="height:70vh;overflow:auto;margin-top:15px;padding-right:5px;">
+    <div class="notif-top">Salam 👋 BAKUGO AI dəstəyə xoş gəldiniz. Necə kömək edə bilərəm?</div>
+  </div>
+  <div style="display:flex;gap:10px;margin-top:15px;">
+    <input id="chatInput" class="input" placeholder="Mesaj yaz...">
+    <button class="btn primary" onclick="sendMessage()">Göndər</button>
+  </div>
+</div>
+
+<div id="helpPanel" class="panel right">
+  <div class="close" onclick="toggleHelp()">⬅ Geri</div>
+  <h3>📚 Məlumat Mərkəzi</h3>
+  <div class="help-section">
+    <h4>📦 Sifariş necə verilir?</h4>
+    <p>Kateqoriyadan məhsul seçin, səbətə əlavə edin və "Sifariş et" düyməsini basın. Sifariş ünvanınızı əvvəlcədən "☰ Menyu → Ünvan" bölməsindən əlavə edin.</p>
+    <h4>🚚 Çatdırılma müddəti nə qədərdir?</h4>
+    <p>Orta çatdırılma müddəti 15-35 dəqiqədir, məsafədən asılı olaraq dəyişə bilər.</p>
+    <h4>💳 Hansı ödəmə üsulları var?</h4>
+    <p>Nağd və bank kartı (Visa/MasterCard) ilə ödəniş edə bilərsiniz. Google Pay dəstəyi tezliklə əlavə olunacaq.</p>
+    <h4>❌ Sifarişi ləğv edə bilərəmmi?</h4>
+    <p>Bəli, sifariş "Hazırlanır" statusunda olduğu müddətdə "Sifarişlər (İzləmə)" bölməsindən ləğv edə bilərsiniz.</p>
+    <h4>🎁 Kupon necə istifadə olunur?</h4>
+    <p>"Kampaniyalar" bölməsindən aktiv kupon kodunu daxil edib "Aktiv et" düyməsini basın.</p>
+    <h4>📞 Əlaqə</h4>
+    <p>Dəstək xətti: +994 70 248 48 52 (24/7)</p>
+  </div>
+</div>
+
+<div id="trackingPanel" class="panel right">
+  <div class="close" onclick="toggleTracking()">⬅ Geri</div>
+  <h3>🚚 Kuryer izləmə</h3>
+  
+  <div id="restaurantInfo" style="background:#0e0e0e; padding:15px; border-radius:12px; margin:10px 0;">
+      <p style="font-size:14px;"><strong>Restoran:</strong> <span id="trackRestName">Yüklənir...</span></p>
+      <p style="font-size:14px;"><strong>Ünvan:</strong> <span id="trackRestAddress">Bakı, mərkəz</span></p>
+      <p style="font-size:14px;"><strong>Telefon:</strong> <span id="trackRestPhone">Yüklənir...</span></p>
+  </div>
+
+  <div style="margin:20px 0;">
+    <div style="background:#0e0e0e;height:10px;border-radius:10px;">
+      <div id="progress" style="height:10px;width:0%;background:var(--orange);border-radius:10px;"></div>
+    </div>
+  </div>
+  <div id="etaCountdownBox" style="margin:15px 0;background:#0e0e0e;padding:16px;border-radius:12px;text-align:center;display:none;">
+    <div id="etaCountdownLabel" style="font-size:13px;opacity:.7;margin-bottom:6px;">🍔 Restoran hazırlayır</div>
+    <div id="etaCountdown" style="font-size:34px;font-weight:800;color:var(--orange);letter-spacing:1px;">3:30</div>
+    <div id="etaCountdownSub" style="font-size:11px;opacity:.55;margin-top:4px;"></div>
+  </div>
+  <p id="statusText">Aktiv sifariş tapılmadı.</p>
+  <div id="map" style="width:100%;height:250px;border-radius:15px;margin-top:15px;display:none;"></div>
+  <div id="courierContactBox" style="display:none;margin-top:15px;background:#0e0e0e;padding:12px;border-radius:12px;">
+    <p style="font-size:14px;"><strong>🛵 Kuryer:</strong> <span id="courierName">-</span></p>
+    <div style="display:flex;gap:10px;margin-top:10px;">
+      <div class="btn primary" style="flex:1;margin-top:0;" onclick="callCourier()">📞 Zəng et</div>
+      <div class="btn primary" style="flex:1;margin-top:0;" onclick="messageCourier()">💬 Yaz</div>
+    </div>
+  </div>
+  <div id="cancelOrderBox" style="display:none;margin-top:15px;">
+    <div class="btn danger" style="background:rgba(255,60,60,0.15);border-color:#ff4d4d;color:#ff8a8a;" onclick="cancelActiveOrder()">❌ Sifarişi ləğv et</div>
+  </div>
+</div>
+
+<div id="toast" style="position:fixed;bottom:80px;left:50%;transform:translateX(-50%);background:#080808;color:#fff;padding:12px 18px;border-radius:10px;display:none;z-index:99999;font-size:14px;">✔ Əlavə olundu</div>
+
+<script>
+const MIN_ORDER_THRESHOLD = 12;
+const DELIVERY_FEE_LOW = 4;
+const DELIVERY_FEE_HIGH = 2.50;
+
+// Şəbəkə loqoları: konkret şəbəkə adına qarşı loqo şəkli linki əlavə edə bilərsiniz (əl ilə override).
+// Məs: chainLogos["Mando"] = "https://.../mando-logo.png";
+// Bunu doldurmasanız belə, sistem avtomatik olaraq həmin şəbəkənin Firestore-dakı
+// məhsullarından birinin "img" sahəsini loqo kimi göstərir (aşağıdakı chainLogoUrl məntiqinə bax).
+const chainLogos = {};
+
+const openChains = new Set();
+
+function toggleChain(headerEl){
+  const key = headerEl.dataset.chainKey;
+  const productsEl = headerEl.nextElementSibling;
+  const isOpen = headerEl.classList.toggle("open");
+  productsEl.classList.toggle("open", isOpen);
+  if(isOpen){
+    openChains.add(key);
+    // Lazy-render: bu restoranın kartları hələ DOM-a yazılmayıbsa, məhz indi (açılan anda) qururuq.
+    // Bağlı qalan yüzlərlə digər restoranın kartları isə heç vaxt yaranmır - bu, 500 restoranda
+    // ilkin yükləmədəki donmanın qarşısını alan əsas dəyişiklikdir.
+    if(productsEl.dataset.rendered !== "1"){
+      const items = (window.__chainItemsRegistry || {})[key];
+      if(items){
+        productsEl.innerHTML = buildCardsHtml(items, window.__lastGlobalSearch || false);
+        productsEl.dataset.rendered = "1";
+      }
+    }
+  } else {
+    openChains.delete(key);
+  }
+}
+
+// Şəkil linkini kart ölçüsünə uyğun kiçildir (mümkün olduğu yerlərdə). Unsplash kimi
+// CDN-lər URL parametri ilə ölçülü/sıxılmış versiya qaytarır - tam ölçülü şəkil əvəzinə
+// bunu yükləmək, 500 restoranda ümumi data həcmini xeyli azaldır. Firebase Storage kimi
+// resize dəstəkləməyən mənbələr üçün link olduğu kimi saxlanılır (server tərəfdə resize
+// extension quraşdırılana qədər bu, backend tərəfində edilməli olan işdir).
+function optimizeImg(url, width){
+  if(!url) return url;
+  width = width || 400;
+  if(url.includes("images.unsplash.com")){
+    const sep = url.includes("?") ? "&" : "?";
+    return `${url}${sep}w=${width}&q=70&auto=format&fit=crop`;
+  }
+  // Firebase Storage-dan gələn restoran/məhsul şəkilləri (adminlərin özü yüklədiyi
+  // real fotolar) əvvəllər HEÇ SIXILMIRDI - 500 restoran × 50+ orijinal ölçülü foto
+  // (adətən 2-5MB/şəkil) telefon donmasının əsas səbəbi məhz bu idi.
+  // images.weserv.nl pulsuz, açıq mənbəli şəkil proksi/sıxma CDN-idir - Firebase
+  // Console-da əlavə quraşdırma tələb etmir, mövcud linkləri "olduğu kimi" qəbul edib
+  // arxa planda ölçüb keşləyir. Bunun sayəsində eyni gündə min dəfə açılsa belə hər
+  // dəfə yenidən sıxılmır (weserv öz tərəfində keşləyir).
+  if(url.includes("firebasestorage.googleapis.com") || url.includes("firebasestorage.app")){
+    const cleanUrl = url.replace(/^https?:\/\//, "");
+    return `https://images.weserv.nl/?url=${encodeURIComponent(cleanUrl)}&w=${width}&q=75&output=webp`;
+  }
+  // Cloudinary (restoran panelindən yüklənən əsas şəkillər indi buradan gəlir):
+  // öz CDN-i üzərində birbaşa ölçü/sıxma/format çevirməsi dəstəkləyir - ayrıca
+  // proksiyə ehtiyac yoxdur, `/upload/` hissəsindən sonra transformasiya əlavə edirik.
+  if(url.includes("res.cloudinary.com")){
+    return url.replace("/upload/", `/upload/w_${width},q_75,f_auto,c_limit/`);
+  }
+  return url;
+}
+
+// Bir restoranın (chain) məhsul kartlarının HTML-ini qurur. Əvvəllər bu məntiq render()
+// içində bütün restoranlar üçün dərhal işə düşürdü; indi lazy-render üçün ayrıca funksiyadır,
+// yalnız açılan restoran üçün çağırılır.
+function buildCardsHtml(items, globalSearch){
+  let cardsHtml = "";
+  items.forEach(({f, i}) => {
+    let isFav = favorites.some(fav => fav.name === f.name) ? "active" : "";
+    let isDiscount = f.discountPercent > 0;
+    let priceHtml = `<div class="price">${f.price.toFixed(2)} AZN / ${f.unit || 'ədəd'}</div>`;
+
+    if(isDiscount) {
+      let oldPrice = f.price;
+      let newPrice = oldPrice - (oldPrice * f.discountPercent / 100);
+      priceHtml = `
+        <div class="price">
+          <span class="original-price">${oldPrice.toFixed(2)} AZN</span>
+          <span class="discount-tag">-${f.discountPercent}%</span>
+          <div style="color:var(--orange); font-weight:bold; font-size:16px;">${newPrice.toFixed(2)} AZN</div>
+        </div>`;
+    }
+
+    const avgRating = getAvgRating(f.name) || f.rating || '5.0';
+
+    cardsHtml += `
+      <div class="card chain-card reveal active ${isDiscount ? 'discounted' : ''}">
+        <div class="fav-btn ${isFav}" onclick="toggleFav(this,${i})">❤</div>
+        ${(f.category === "Tütün" || f.alcohol === true) ? '<div style="position:absolute;top:6px;right:8px;z-index:6;background:#d40000;color:#fff;font-size:10px;font-weight:bold;padding:2px 6px;border-radius:6px;">🔞 18+</div>' : ''}
+        <img src="${optimizeImg(f.img, 400)}" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400';" onclick="openProduct(${i})">
+        <div class="card-info">
+          ${globalSearch ? `<div style="font-size: 11px; color: var(--orange); margin-bottom: 4px; font-weight: 600; text-transform: uppercase;">${f.category}</div>` : ''}
+          <h3>${f.name}</h3>
+          <div class="rating">⭐ ${avgRating}</div>
+          ${priceHtml}
+          <button onclick="add(${i})">+ Səbətə</button>
+        </div>
+      </div>
+    `;
+  });
+  return cardsHtml;
+}
+
+let __renderDebounceTimer = null;
+function debouncedRender(searchText = "", globalSearch = false){
+  if(__renderDebounceTimer) clearTimeout(__renderDebounceTimer);
+  __renderDebounceTimer = setTimeout(() => {
+    __renderDebounceTimer = null;
+    render(searchText, globalSearch);
+  }, 250);
+}
+window.debouncedRender = debouncedRender;
+
+async function render(searchText = "", globalSearch = false){
+  const grid = document.getElementById("grid");
+  if(!grid) return;
+
+  // QEYD: grid burada qəsdən boşaldılmır. Əvvəllər "grid.innerHTML=''" dərhal
+  // çağırılırdı, sonra doldurulurdu - bu, hər axtarış/kateqoriya dəyişimində
+  // boş-dolu-boş "yanıb-sönmə" effekti yaradırdı. İndi grid yalnız YENİ məzmun
+  // hazır olanda BİR DƏFƏ yenilənir (aşağıda), ekran heç vaxt boş görünmür.
+  let found = false;
+
+  // Kateqoriyaya/axtarışa uyğun məhsulları şəbəkə (chain) üzrə qruplaşdırırıq
+  const groups = new Map();
+  foods.forEach((f,i)=>{
+    const matchesCategory = globalSearch ? true : (f.category === currentCategory);
+    const matchesSearch = f.name.toLowerCase().includes(searchText.toLowerCase());
+    if(matchesCategory && matchesSearch){
+      found = true;
+      const chainKey = f.chain || 'Bakugo';
+      if(!groups.has(chainKey)) groups.set(chainKey, []);
+      groups.get(chainKey).push({f, i});
+    }
+  });
+
+  // Wolt-tərzi: istifadəçinin koordinatı varsa, hər qrupun (restoranın) məsafəsini
+  // hesablayırıq, çatdırılma radiusundan kənar olanları gizlədirik və qalanları
+  // ən yaxından ən uzağa sıralayırıq. Koordinat yoxdursa (icazə verilməyib və s.)
+  // heç bir filter/sıralama tətbiq etmirik - hamısı əvvəlki qaydada göstərilir.
+  const uLatForSort = parseFloat(localStorage.getItem("userLat"));
+  const uLngForSort = parseFloat(localStorage.getItem("userLng"));
+  const hasUserCoords = !isNaN(uLatForSort) && !isNaN(uLngForSort);
+
+  let groupEntries = Array.from(groups.entries()).map(([chainKey, items]) => {
+    const groupRestaurantId = items.find(it => it.f.restaurantId && it.f.restaurantId !== "unknown")?.f.restaurantId;
+    const coords = groupRestaurantId ? restaurantCoords[groupRestaurantId] : null;
+    let distanceKm = null;
+    if(hasUserCoords && coords){
+      distanceKm = haversineDistanceKm(coords.lat, coords.lng, uLatForSort, uLngForSort);
+    }
+    return { chainKey, items, distanceKm };
+  });
+
+  if(hasUserCoords){
+    // Koordinatı bilinən və radiusdan uzaq olan restoranları göstərmirik.
+    // Koordinatı bilinməyən (məs. hələ məsafə məlumatı gəlməyib) qrupları qırağa atmırıq.
+    groupEntries = groupEntries.filter(g => g.distanceKm === null || g.distanceKm <= MAX_DELIVERY_RADIUS_KM);
+    groupEntries.sort((a, b) => {
+      if(a.distanceKm === null && b.distanceKm === null) return 0;
+      if(a.distanceKm === null) return 1;
+      if(b.distanceKm === null) return -1;
+      return a.distanceKm - b.distanceKm;
+    });
+  }
+
+  found = groupEntries.length > 0;
+
+  // toggleChain() bu iki qlobal dəyəri restoran sonradan açılanda kartlarını qurmaq üçün istifadə edir.
+  window.__lastGlobalSearch = globalSearch;
+  const chainItemsRegistry = window.__chainItemsRegistry = {};
+
+  if(!found){
+    grid.innerHTML = `<div style="text-align:center;padding:40px;font-size:20px;opacity:.7;">😔 ${globalSearch ? 'Axtarışa uyğun məhsul tapılmadı' : 'Bu kateqoriyada məhsul yoxdur'}</div>`;
+  } else {
+    let sectionsHtml = "";
+    let groupIndex = 0;
+    groupEntries.forEach(({ chainKey, items, distanceKm }) => {
+      groupIndex++;
+      const chainSafeKey = `${chainKey}-${groupIndex}`.replace(/[^a-zA-Z0-9]/g, '_');
+      const isOpen = openChains.has(chainSafeKey);
+      const chainInitial = chainKey.trim().charAt(0).toUpperCase() || '🍽';
+      // Loqo prioriteti: 1) əl ilə təyin edilmiş chainLogos  2) məhsulun chainLogo sahəsi
+      // 3) restoranın Firestore-dakı öz loqosu (photoURL). ARTIQ təsadüfi məhsul şəklinə
+      // FALLBACK EDİLMİR - yoxdursa təmiz baş hərf emblemi göstərilir (Bolt Food/Wolt tərzi).
+      const explicitLogo = chainLogos[chainKey] || items.find(it => it.f.chainLogo)?.f.chainLogo;
+      const groupRestaurantId = items.find(it => it.f.restaurantId && it.f.restaurantId !== "unknown")?.f.restaurantId;
+      const restaurantLogoUrl = groupRestaurantId ? (restaurantPhotos[groupRestaurantId] || "") : "";
+      const chainLogoUrl = explicitLogo || restaurantLogoUrl || "";
+      const chainIconHtml = chainLogoUrl
+        ? `<img src="${optimizeImg(chainLogoUrl, 100)}" alt="${chainKey}" loading="lazy" onerror="this.parentElement.innerHTML='${chainInitial}';">`
+        : chainInitial;
+
+      // Zəncirin orta reytinqi (Bolt Food/Wolt-dakı ⭐ çipi üçün)
+      const ratingsSum = items.reduce((s, it) => s + parseFloat(getAvgRating(it.f.name) || it.f.rating || 5.0), 0);
+      const chainAvgRating = (ratingsSum / items.length).toFixed(1);
+
+      // Çatdırılma vaxtı çipi - restoranın öz koordinatından məsafə bilinirsə ona görə
+      // (Wolt-tərzi, hər restoran üçün fərqli ETA), yoxdursa ümumi hub-əsaslı təxmin.
+      let etaLabel = "20-35 dəq";
+      if(distanceKm !== null && distanceKm !== undefined){
+        const { low, high } = deliveryETAFromDistance(distanceKm);
+        etaLabel = `${low}-${high} dəq`;
+      } else {
+        const uLat = parseFloat(localStorage.getItem("userLat"));
+        const uLng = parseFloat(localStorage.getItem("userLng"));
+        if(!isNaN(uLat) && !isNaN(uLng) && typeof calculateDeliveryETA === "function"){
+          const { low, high } = calculateDeliveryETA(uLat, uLng);
+          etaLabel = `${low}-${high} dəq`;
+        }
+      }
+
+      // Reyestrə qeyd edirik ki, bu restoran sonradan (açılanda) toggleChain() tərəfindən tapıla bilsin.
+      chainItemsRegistry[chainSafeKey] = items;
+      // YALNIZ artıq açıq olan restoranın kartlarını indi qururuq. Bağlı restoranlar üçün
+      // heç bir <img> və kart DOM-a yazılmır - bu, 500 restoranda ilkin render-i yüngülləşdirən əsas hissədir.
+      let cardsHtml = isOpen ? buildCardsHtml(items, globalSearch) : "";
+
+      sectionsHtml += `
+        <div class="chain-section">
+          <div class="chain-header ${isOpen ? 'open' : ''}" data-chain-key="${chainSafeKey}" onclick="toggleChain(this)">
+            <div class="chain-header-left">
+              <div class="chain-icon">${chainIconHtml}</div>
+              <div style="min-width:0;">
+                <div class="chain-name">${chainKey}</div>
+                <div class="chain-badges">
+                  <span class="chain-badge rating">⭐ ${chainAvgRating}</span>
+                  <span class="chain-badge eta">🕒 ${etaLabel}</span>
+                  <span class="chain-badge count">${items.length} məhsul</span>
+                </div>
+              </div>
+            </div>
+            <div class="chain-arrow">▼</div>
+          </div>
+          <div class="chain-products ${isOpen ? 'open' : ''}" data-rendered="${isOpen ? '1' : '0'}">
+            ${cardsHtml}
+          </div>
+        </div>
+      `;
+    });
+    grid.innerHTML = sectionsHtml;
+  }
+}
+
+let locationMap, locationMarker, locationAccuracyCircle;
+
+// Leaflet-i (xəritə kitabxanası, ~150KB) BURADA, ilk dəfə xəritə lazım olanda yükləyirik.
+// Əvvəllər <head>-də hər açılışda yüklənirdi, hətta istifadəçi heç vaxt xəritəyə baxmasa belə.
+// Bu, ilkin yükləmə ağırlığını azaldır və HTML-in bloklanmadan tez çəkilməsini təmin edir.
+let __leafletLoadPromise = null;
+function loadLeaflet(){
+  if(window.L) return Promise.resolve();
+  if(__leafletLoadPromise) return __leafletLoadPromise;
+  __leafletLoadPromise = new Promise((resolve, reject) => {
+    const cssLink = document.createElement("link");
+    cssLink.rel = "stylesheet";
+    cssLink.href = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.css";
+    document.head.appendChild(cssLink);
+
+    const script = document.createElement("script");
+    script.src = "https://unpkg.com/leaflet@1.9.4/dist/leaflet.js";
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Leaflet yüklənmədi"));
+    document.head.appendChild(script);
+  });
+  return __leafletLoadPromise;
+}
+
+async function initLocationMap(lat, lon, accuracy){
+  await loadLeaflet();
+  const mapEl = document.getElementById("locationMap");
+  if(!mapEl) return;
+  const startLat = lat || parseFloat(localStorage.getItem("userLat")) || 40.4093;
+  const startLon = lon || parseFloat(localStorage.getItem("userLng")) || 49.8671;
+  // GPS-dən yeni gələn nöqtə olduqda daha yaxın zoom edək ki, dəqiqlik gözlə görünsün
+  const zoomLevel = (lat && lon) ? 17 : 15;
+
+  if(!locationMap){
+    locationMap = L.map("locationMap").setView([startLat, startLon], zoomLevel);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap'
+    }).addTo(locationMap);
+    locationMarker = L.marker([startLat, startLon], { draggable: true }).addTo(locationMap);
+
+    locationMarker.on("dragend", async () => {
+      const pos = locationMarker.getLatLng();
+      if(locationAccuracyCircle){ locationMap.removeLayer(locationAccuracyCircle); locationAccuracyCircle = null; }
+      await reverseGeocodeToInput(pos.lat, pos.lng);
+    });
+
+    locationMap.on("click", async (e) => {
+      locationMarker.setLatLng(e.latlng);
+      if(locationAccuracyCircle){ locationMap.removeLayer(locationAccuracyCircle); locationAccuracyCircle = null; }
+      await reverseGeocodeToInput(e.latlng.lat, e.latlng.lng);
+    });
+  } else {
+    locationMap.setView([startLat, startLon], zoomLevel);
+    locationMarker.setLatLng([startLat, startLon]);
+  }
+
+  // GPS-dən gələn dəqiqlik radiusunu xəritədə göstər (istifadəçi nöqtənin nə qədər etibarlı olduğunu görsün)
+  if(accuracy){
+    if(locationAccuracyCircle) locationMap.removeLayer(locationAccuracyCircle);
+    locationAccuracyCircle = L.circle([startLat, startLon], {
+      radius: accuracy,
+      color: "#ff7a00",
+      fillColor: "#ff7a00",
+      fillOpacity: 0.15,
+      weight: 1
+    }).addTo(locationMap);
+  }
+
+  setTimeout(() => { if(locationMap) locationMap.invalidateSize(); }, 300);
+}
+
+async function reverseGeocodeToInput(lat, lon){
+  localStorage.setItem("userLat", lat);
+  localStorage.setItem("userLng", lon);
+  updateDeliveryStripText();
+  try {
+    const url = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}`;
+    const response = await fetch(url);
+    const data = await response.json();
+    const address = data.display_name || `${lat}, ${lon}`;
+    document.getElementById("location").value = address;
+  } catch(e) {
+    document.getElementById("location").value = `${lat}, ${lon}`;
+  }
+}
+
+async function getCurrentLocation() {
+    if (!navigator.geolocation) {
+        showToast("❌ Brauzeriniz məkan dəstəkləmir");
+        return;
+    }
+    showToast("📍 Dəqiq məkan tapılır...");
+
+    const geoOptions = {
+        enableHighAccuracy: true,   // GPS-dən istifadə et, təqribi Wi-Fi/IP məkanı yox
+        timeout: 15000,
+        maximumAge: 0               // köhnə keşlənmiş nəticəni istifadə etmə
+    };
+
+    navigator.geolocation.getCurrentPosition(async (position) => {
+        const lat = position.coords.latitude;
+        const lon = position.coords.longitude;
+        const accuracy = position.coords.accuracy; // metrlə dəqiqlik
+
+        await reverseGeocodeToInput(lat, lon);
+        initLocationMap(lat, lon, accuracy);
+        if(window.listenFirestoreRestaurants) window.listenFirestoreRestaurants();
+        if(window.recomputeNearbyProducts) window.recomputeNearbyProducts();
+
+        if(window.currentUser) {
+            const { doc, updateDoc } = window.firebaseFirestore;
+            await updateDoc(doc(db, "users", window.currentUser.uid), {
+                address: document.getElementById("location").value,
+                customerLat: lat,
+                customerLng: lon,
+                locationAccuracy: accuracy,
+                locationUpdatedAt: new Date()
+            });
+            showToast(`✅ Məkan Firebase-ə yazıldı! (±${Math.round(accuracy)}m)`);
+        } else {
+            showToast(`✅ Məkan təyin olundu! (±${Math.round(accuracy)}m)`);
+        }
+    }, (err) => {
+        let msg = "❌ Məkan tapılmadı";
+        if (err.code === 1) msg = "❌ Məkan icazəsi rədd edildi. Brauzer ayarlarından icazə verin.";
+        else if (err.code === 2) msg = "❌ Məkan siqnalı alınmadı. GPS/İnternet açıq olduğuna əmin olun.";
+        else if (err.code === 3) msg = "❌ Vaxt bitdi, yenidən cəhd edin (açıq havada daha dəqiq işləyir).";
+        showToast(msg);
+    }, geoOptions);
+}
+
+setTimeout(()=>{
+  const splash = document.getElementById("splash");
+  const auth = document.getElementById("auth");
+  if(splash) splash.style.display="none";
+  if(auth && !window.currentUser) auth.style.display="flex";
+},1500);
+
+function toggleMenu(){
+  document.getElementById("menu").classList.toggle("active");
+  if(document.getElementById("menu").classList.contains("active")){
+    setTimeout(()=>initLocationMap(), 200);
+  }
+}
+function toggleNotif(){
+  document.getElementById("notif").classList.toggle("active");
+  document.getElementById("count").innerText="0";
+  markNotificationsRead();
+}
+function toggleAccount(){document.getElementById("account").classList.toggle("active");}
+function toggleCart(){document.getElementById("cart").classList.toggle("active");}
+function toggleFavorites(){document.getElementById("favoritesPanel").classList.toggle("active");}
+function togglePayment(){document.getElementById("paymentPanel").classList.toggle("active");}
+function toggleTheme(){document.getElementById("themePanel").classList.toggle("active");}
+function togglePrivacy(){document.getElementById("privacyPanel").classList.toggle("active");}
+function toggleSupport(){document.getElementById("supportPanel").classList.toggle("active");}
+function toggleOrdersHistory(){document.getElementById("ordersHistoryPanel").classList.toggle("active");}
+function toggleCampaigns(){
+  document.getElementById("campaignsPanel").classList.toggle("active");
+  if(document.getElementById("campaignsPanel").classList.contains("active")){
+    markPromoCodesRead();
+  }
+}
+function toggleTracking(){document.getElementById("trackingPanel").classList.toggle("active");}
+function toggleHelp(){document.getElementById("helpPanel").classList.toggle("active");}
+
+// BAKUGO-nun mərkəzi anbar/hub koordinatı (Bakı mərkəzi) - məsafə hesablamaları buradan aparılır
+const BAKUGO_HUB_LAT = 40.4093;
+const BAKUGO_HUB_LNG = 49.8671;
+
+// İki koordinat arasındakı məsafəni km ilə hesablayır (Haversine düsturu)
+function haversineDistanceKm(lat1, lon1, lat2, lon2){
+  const R = 6371;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
+/* ================== GEOHASH (Wolt-tərzi coğrafi sorğu) ==================
+   Məqsəd: "restaurants" kolleksiyasından HƏR DƏFƏ bütün sənədləri çəkib client
+   tərəfdə filtrləmək əvəzinə, Firestore-un özündə YALNIZ müştəriyə yaxın
+   restoranları qaytaran sorğu qurmaq. Bunun üçün hər restoran sənədində
+   "geohash" adlı sətir sahə olmalıdır (bax: backfillRestaurantGeohashes()).
+   Firestore composite/range sorğu dəstəkləmədiyi üçün (lat VƏ lng eyni anda),
+   standart həll - geohash sətrini leksikoqrafik prefiks aralığı ilə sorğulamaqdır:
+   where("geohash",">=",prefix) VƏ where("geohash","<",prefix+"\uf8ff").
+   Bu, dəqiq dairə vermir (kvadrat "qutu" verir) - ona görə nəticə YENƏ DƏ
+   getNearbyRestaurantIds() içində haversine ilə dəqiqləşdirilir (aşağıda). */
+const GEOHASH_BASE32 = "0123456789bcdefghjkmnpqrstuvwxyz";
+
+function encodeGeohash(lat, lng, precision = 9){
+  let latRange = [-90, 90];
+  let lngRange = [-180, 180];
+  let isEvenBit = true;
+  let bit = 0, ch = 0, geohash = "";
+  while(geohash.length < precision){
+    if(isEvenBit){
+      const mid = (lngRange[0] + lngRange[1]) / 2;
+      if(lng >= mid){ ch = (ch << 1) + 1; lngRange[0] = mid; }
+      else{ ch = (ch << 1); lngRange[1] = mid; }
+    } else {
+      const mid = (latRange[0] + latRange[1]) / 2;
+      if(lat >= mid){ ch = (ch << 1) + 1; latRange[0] = mid; }
+      else{ ch = (ch << 1); latRange[1] = mid; }
+    }
+    isEvenBit = !isEvenBit;
+    bit++;
+    if(bit === 5){ geohash += GEOHASH_BASE32.charAt(ch); bit = 0; ch = 0; }
+  }
+  return geohash;
+}
+window.encodeGeohash = encodeGeohash;
+
+// Hər geohash uzunluğunun (precision) təxmini ən kiçik xana ölçüsü (km).
+// Radiusa uyğun ən böyük precision seçilir ki, dairəni əhatə etmək üçün
+// çox sayda (onlarla) ayrı sorğu/listener açmaq lazım gəlməsin.
+const GEOHASH_CELL_KM = { 1:5000, 2:625, 3:156, 4:19.5, 5:4.89, 6:0.61, 7:0.153, 8:0.0191, 9:0.00477 };
+function pickGeohashPrecision(radiusKm){
+  let chosen = 1;
+  for(let p = 1; p <= 9; p++){
+    if(GEOHASH_CELL_KM[p] >= radiusKm) chosen = p; else break;
+  }
+  return chosen;
+}
+
+// Verilən mərkəz + radius (km) üçün, o dairəni əhatə edən geohash prefikslərini
+// qaytarır (mərkəz + 8 ətraf nöqtə - "3x3 qonşu xana" texnikası). Adətən 1-4 arası
+// prefiks çıxır ki, hər biri ayrı bir onSnapshot sorğusuna çevrilir.
+function geohashPrefixesForRadius(centerLat, centerLng, radiusKm){
+  const precision = pickGeohashPrecision(radiusKm);
+  const latDelta = radiusKm / 111;
+  const lngDelta = radiusKm / (111 * Math.max(0.000001, Math.cos(centerLat * Math.PI / 180)));
+  const points = [
+    [centerLat, centerLng],
+    [centerLat+latDelta, centerLng], [centerLat-latDelta, centerLng],
+    [centerLat, centerLng+lngDelta], [centerLat, centerLng-lngDelta],
+    [centerLat+latDelta, centerLng+lngDelta], [centerLat+latDelta, centerLng-lngDelta],
+    [centerLat-latDelta, centerLng+lngDelta], [centerLat-latDelta, centerLng-lngDelta],
+  ];
+  const prefixes = new Set();
+  points.forEach(([la, ln]) => {
+    const clampedLat = Math.max(-90, Math.min(90, la));
+    let wrapped = ln;
+    while(wrapped > 180) wrapped -= 360;
+    while(wrapped < -180) wrapped += 360;
+    prefixes.add(encodeGeohash(clampedLat, wrapped, precision));
+  });
+  return Array.from(prefixes);
+}
+
+// BİR DƏFƏLİK MİQRASİYA ALƏTİ: mövcud restoran sənədlərinə (restaurantLat/Lng var,
+// amma geohash sahəsi yoxdursa) geohash sahəsini hesablayıb yazır. Yazma icazəsi
+// admin/backend hesabında olmalıdır - adi müştəri hesabından İŞLƏMƏYƏ BİLƏR (Firestore
+// təhlükəsizlik qaydalarından asılıdır). Admin kimi daxil olub brauzer konsolunda
+// bir dəfə "await backfillRestaurantGeohashes()" çağırmaq kifayətdir.
+// QEYD: bu funksiya modul (`type="module"`) scriptindən ƏVVƏL yazılıb, ona görə
+// `db`, `collection`, `query` kimi sabitləri BİLAVASİTƏ görə bilmir - onları
+// window.db / window.firebaseFirestore üzərindən çağırma anında (funksiya
+// işə düşəndə, səhifə tam yükləndikdən sonra) alır.
+window.backfillRestaurantGeohashes = async function(){
+  const fb = window.firebaseFirestore;
+  const dbRef = window.db;
+  if(!fb || !dbRef){ console.error("❌ Firebase hələ hazır deyil, bir az gözləyib yenidən cəhd edin."); return; }
+  const snap = await fb.getDocs(fb.collection(dbRef, "restaurants"));
+  let batch = fb.writeBatch(dbRef);
+  let opsInBatch = 0, updated = 0, skipped = 0;
+  for(const docSnap of snap.docs){
+    const d = docSnap.data();
+    if(d.geohash){ skipped++; continue; }
+    const lat = parseFloat(d.restaurantLat);
+    const lng = parseFloat(d.restaurantLng);
+    if(isNaN(lat) || isNaN(lng)){ skipped++; continue; }
+    batch.update(docSnap.ref, { geohash: encodeGeohash(lat, lng, 9) });
+    opsInBatch++; updated++;
+    if(opsInBatch >= 400){
+      await batch.commit();
+      batch = fb.writeBatch(dbRef);
+      opsInBatch = 0;
+    }
+  }
+  if(opsInBatch > 0) await batch.commit();
+  console.log(`✅ backfillRestaurantGeohashes: ${updated} restoran yeniləndi, ${skipped} keçildi (artıq var idi/koordinat yoxdur).`);
+  return { updated, skipped };
+};
+
+// Real yol marşrutuna görə məsafə (km) və müddət (saniyə) - OSRM açıq marşrutlaşdırma servisi.
+// Kuryer tətbiqindəki eyni OSRM inteqrasiyası ilə uyğundur, ona görə hər iki tərəfdə eyni "real" rəqəm görünür.
+// Şəbəkə xətası olarsa haversine (düz xətt) təxminə geri qayıdır ki, sayğac heç vaxt tamam boş qalmasın.
+async function getRealRoadRoute(lat1, lon1, lat2, lon2){
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${lon1},${lat1};${lon2},${lat2}?overview=false`;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(url, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    const data = await res.json();
+    if(data && data.code === "Ok" && data.routes && data.routes[0]){
+      return {
+        distanceKm: data.routes[0].distance / 1000,
+        durationSeconds: data.routes[0].duration,
+        isReal: true
+      };
+    }
+    throw new Error("OSRM boş cavab");
+  } catch(e){
+    // Fallback: düz xətt məsafəsi üzərindən təxmin (real yol marşrutu alınmadıqda)
+    const distanceKm = haversineDistanceKm(lat1, lon1, lat2, lon2);
+    const durationSeconds = (distanceKm / COURIER_AVG_SPEED_KMH) * 3600;
+    return { distanceKm, durationSeconds, isReal: false };
+  }
+}
+
+/* ================== SİFARİŞ SAYĞACLARI (real vaxt) ==================
+   1) Restoranın hazırlıq vaxtı: sabit 3.5 dəqiqə (210 saniyə), sifariş
+      qəbul olunan andan (createdAt) geriyə doğru sayılır.
+   2) Kuryerin müştəriyə çatma vaxtı: kuryerin (courierId ilə) real
+      koordinatları ilə müştərinin koordinatları arasındakı məsafəyə görə
+      HƏR SANİYƏ yenidən hesablanır və geriyə doğru sayğac kimi göstərilir. */
+const PREP_TIME_SECONDS = 210;           // 3.5 dəq - restoran hazırlıq vaxtı (sabit)
+const COURIER_AVG_SPEED_KMH = 22;        // kuryerin orta hərəkət sürəti (şəhər daxili)
+const COURIER_MIN_ETA_SECONDS = 60;      // minimum göstərilən çatma vaxtı
+
+let prepCountdownInterval = null;
+let etaCountdownInterval = null;
+
+function formatCountdown(totalSeconds){
+  const s = Math.max(0, Math.round(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return m + ":" + (sec < 10 ? "0" : "") + sec;
+}
+
+function stopAllOrderCountdowns(){
+  if(prepCountdownInterval){ clearInterval(prepCountdownInterval); prepCountdownInterval = null; }
+  if(etaCountdownInterval){ clearInterval(etaCountdownInterval); etaCountdownInterval = null; }
+  const box = document.getElementById("etaCountdownBox");
+  if(box) box.style.display = "none";
+  // Aktiv sifariş bitdi/yoxdur - yuxarıdakı sayğac çipini adi ünvan-əsaslı təxmini vaxta qaytarırıq
+  if(typeof updateDeliveryStripText === "function") updateDeliveryStripText();
+}
+
+// Restoranın 3.5 dəqiqəlik hazırlıq sayğacı - sifarişin yaradıldığı andan hesablanır
+function startPrepCountdown(createdAtMs){
+  if(prepCountdownInterval){ clearInterval(prepCountdownInterval); prepCountdownInterval = null; }
+  if(etaCountdownInterval){ clearInterval(etaCountdownInterval); etaCountdownInterval = null; }
+
+  const box = document.getElementById("etaCountdownBox");
+  const label = document.getElementById("etaCountdownLabel");
+  const valueEl = document.getElementById("etaCountdown");
+  const subEl = document.getElementById("etaCountdownSub");
+  const topEtaEl = document.getElementById("deliveryStripEta");
+  if(!box || !valueEl) return;
+
+  box.style.display = "block";
+  if(label) label.innerText = "🍔 Restoran sifarişi hazırlayır";
+  if(subEl) subEl.innerText = "Təxmini hazırlıq vaxtı: 3 dəq 30 san";
+
+  function tick(){
+    const elapsedSec = (Date.now() - createdAtMs) / 1000;
+    const remaining = PREP_TIME_SECONDS - elapsedSec;
+    if(remaining > 0){
+      valueEl.innerText = formatCountdown(remaining);
+      if(topEtaEl) topEtaEl.textContent = "🍔 " + formatCountdown(remaining);
+    } else {
+      valueEl.innerText = "Hazırdır ✅";
+      if(subEl) subEl.innerText = "Kuryer tezliklə təyin olunacaq";
+      if(topEtaEl) topEtaEl.textContent = "🍔 Hazırdır";
+      clearInterval(prepCountdownInterval);
+      prepCountdownInterval = null;
+    }
+  }
+  tick();
+  prepCountdownInterval = setInterval(tick, 1000);
+}
+
+// Kuryerin hədəfə (restoran və ya müştəri) çatma vaxtını REAL yol marşrutuna görə hesablayıb
+// geriyə sayğac kimi göstərir. `leg` "toRestaurant" və ya "toCustomer" ola bilər - bunlar fərqli
+// mətn/ikon göstərir ki, istifadəçi kuryerin harada olduğunu səhv anlamasın.
+async function startCourierEtaCountdown(courierLat, courierLng, destLat, destLng, leg){
+  leg = leg || "toCustomer";
+  if(prepCountdownInterval){ clearInterval(prepCountdownInterval); prepCountdownInterval = null; }
+
+  const box = document.getElementById("etaCountdownBox");
+  const label = document.getElementById("etaCountdownLabel");
+  const valueEl = document.getElementById("etaCountdown");
+  const subEl = document.getElementById("etaCountdownSub");
+  const topEtaEl = document.getElementById("deliveryStripEta");
+  if(!box || !valueEl) return;
+
+  if(courierLat == null || courierLng == null || isNaN(courierLat) || isNaN(courierLng) ||
+     destLat == null || destLng == null || isNaN(destLat) || isNaN(destLng)){
+    box.style.display = "none";
+    return;
+  }
+
+  const labelText = leg === "toRestaurant" ? "🛵 Kuryer restorana gəlir" : "🛵 Kuryer sizə doğru gəlir";
+  const arrivedText = leg === "toRestaurant" ? "Restorana çatdı 🏪" : "Çatdı 📍";
+  const arrivedSubText = leg === "toRestaurant" ? "Kuryer sifarişi götürür" : "Kuryer ünvanınıza çatıb";
+  const icon = leg === "toRestaurant" ? "🛵" : "🛵";
+
+  box.style.display = "block";
+  if(label) label.innerText = labelText;
+  if(subEl) subEl.innerText = "Marşrut hesablanır...";
+
+  const route = await getRealRoadRoute(courierLat, courierLng, destLat, destLng);
+
+  const distanceKm = route.distanceKm;
+  const newTargetSeconds = Math.max(COURIER_MIN_ETA_SECONDS, route.durationSeconds);
+
+  if(subEl){
+    subEl.innerText = "Məsafə: " + distanceKm.toFixed(1) + " km (real yol marşrutu)"
+      + (route.isReal ? "" : " · təxmini");
+  }
+
+  // Hər dəfə kuryerin yeni koordinatı gəldikdə sayğac real marşruta görə yenidən qurulur
+  if(etaCountdownInterval){ clearInterval(etaCountdownInterval); etaCountdownInterval = null; }
+  let remaining = newTargetSeconds;
+  valueEl.innerText = formatCountdown(remaining);
+  if(topEtaEl) topEtaEl.textContent = icon + " " + formatCountdown(remaining);
+
+  etaCountdownInterval = setInterval(function(){
+    remaining -= 1;
+    if(remaining <= 0){
+      valueEl.innerText = arrivedText;
+      if(subEl) subEl.innerText = arrivedSubText;
+      if(topEtaEl) topEtaEl.textContent = "📍 " + arrivedText;
+      clearInterval(etaCountdownInterval);
+      etaCountdownInterval = null;
+      return;
+    }
+    valueEl.innerText = formatCountdown(remaining);
+    if(topEtaEl) topEtaEl.textContent = icon + " " + formatCountdown(remaining);
+  }, 1000);
+}
+
+// Real ünvana görə təxmini çatdırılma müddətini (dəqiqə aralığı) hesablayır
+const ETA_PREP_TIME_MIN = 9;   // hazırlıq/yığım vaxtı
+const ETA_AVG_SPEED_KMH = 21;  // şəhər daxili kuryer sürəti (motosiklet/skuter, tıxaclarla)
+
+// Artıq hesablanmış məsafədən (km) ETA aralığı çıxarır - restoran-spesifik və
+// hub-əsaslı hesablamaların ikisi də bu düsturu paylaşsın deyə ayrıca funksiyaya çıxarılıb.
+function deliveryETAFromDistance(distanceKm){
+  const travelMin = (distanceKm / ETA_AVG_SPEED_KMH) * 60;
+  let low = Math.round((ETA_PREP_TIME_MIN + travelMin - 6) / 5) * 5;
+  let high = Math.round((ETA_PREP_TIME_MIN + travelMin + 6) / 5) * 5;
+  low = Math.max(10, low);
+  high = Math.max(low + 10, high);
+  high = Math.min(90, high);
+  return { low, high };
+}
+
+function calculateDeliveryETA(lat, lon){
+  const distanceKm = haversineDistanceKm(BAKUGO_HUB_LAT, BAKUGO_HUB_LNG, lat, lon);
+  const { low, high } = deliveryETAFromDistance(distanceKm);
+  return { low, high, distanceKm };
+}
+
+function updateDeliveryStripText(){
+  const etaEl = document.getElementById("deliveryStripEta");
+  if(!etaEl) return;
+  // Aktiv sifariş sayğacı işləyirsə, bu ümumi ünvan-əsaslı təxmini vaxtla üst-üstə düşməsin
+  // deyə toxunmuruq - sayğac funksiyaları özləri bu elementi real vaxtda yeniləyir.
+  if(prepCountdownInterval || etaCountdownInterval) return;
+
+  const lat = parseFloat(localStorage.getItem("userLat"));
+  const lon = parseFloat(localStorage.getItem("userLng"));
+  if(!isNaN(lat) && !isNaN(lon)){
+    const { low, high, distanceKm } = calculateDeliveryETA(lat, lon);
+    etaEl.textContent = `⏱ ${low}-${high} dəq`;
+    etaEl.title = `Təxmini məsafə: ${distanceKm.toFixed(1)} km`;
+  } else {
+    etaEl.textContent = "⏱ 15-35 dəq";
+    etaEl.removeAttribute("title");
+  }
+}
+
+async function saveLocation(){
+  const locationInput = document.getElementById("location");
+  const locValue = locationInput.value;
+  if (!locValue) {
+      showToast("❌ Zəhmət olmasa ünvan daxil edin");
+      return;
+  }
+  let lat = localStorage.getItem("userLat");
+  let lon = localStorage.getItem("userLng");
+
+  if(!lat || !lon){
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(locValue)}`;
+    try {
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data && data.length > 0) {
+            lat = data[0].lat;
+            lon = data[0].lon;
+        } else {
+            showToast("❌ Ünvan tapılmadı");
+            return;
+        }
+    } catch(e) { showToast("❌ Xəta baş verdi"); return; }
+  }
+
+  const latNum = parseFloat(lat);
+  const lonNum = parseFloat(lon);
+
+  localStorage.setItem("userLocation", locValue);
+  localStorage.setItem("userLat", latNum);
+  localStorage.setItem("userLng", lonNum);
+  initLocationMap(latNum, lonNum);
+  updateDeliveryStripText();
+  if(window.listenFirestoreRestaurants) window.listenFirestoreRestaurants();
+  if(window.recomputeNearbyProducts) window.recomputeNearbyProducts();
+
+  if(window.currentUser) {
+    const { doc, updateDoc } = window.firebaseFirestore;
+    await updateDoc(doc(db, "users", window.currentUser.uid), { address: locValue, customerLat: latNum, customerLng: lonNum });
+    showToast("📍 Koordinatlar yadda saxlanıldı");
+  } else {
+    showToast("📍 Məkan yadda saxlanıldı");
+  }
+}
+
+function deleteLocation(){
+  document.getElementById("location").value = "";
+  localStorage.removeItem("userLocation");
+  localStorage.removeItem("userLat");
+  localStorage.removeItem("userLng");
+  updateDeliveryStripText();
+  if(window.listenFirestoreRestaurants) window.listenFirestoreRestaurants();
+  if(window.recomputeNearbyProducts) window.recomputeNearbyProducts();
+  showToast("❌ Məkan silindi");
+}
+
+(function(){
+  const savedLocation = localStorage.getItem("userLocation");
+  if(savedLocation && document.getElementById("location")){
+    document.getElementById("location").value = savedLocation;
+  }
+  updateDeliveryStripText();
+})();
+
+const staticFoods = [
+  { name: "Bakugo Özel Burger", price: 8.50, discountPercent: 10, unit: "ədəd", rating: 4.9, category: "Restoranlar", img: "https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=600" },
+  { name: "Pepperoni Pizza Premium", price: 12.00, discountPercent: 0, unit: "ədəd", rating: 4.8, category: "Restoranlar", img: "https://images.unsplash.com/photo-1548365328-9f547f3f2f5c?w=600" },
+  { name: "Philadelphia Set (16 ədəd)", price: 24.00, discountPercent: 15, unit: "ədəd", rating: 4.7, category: "Restoranlar", img: "https://images.unsplash.com/photo-1553621042-f6e147245754?w=600" },
+  { name: "Sezar Salat Toyuq ilə", price: 9.00, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Restoranlar", img: "https://images.unsplash.com/photo-1550304943-4f24f54ddde9?w=600" },
+  { name: "Klub Sendviç Pro", price: 6.50, discountPercent: 5, unit: "ədəd", rating: 4.5, category: "Restoranlar", img: "https://images.unsplash.com/photo-1567234669003-dce7a7a88821?w=600" },
+  { name: "Süd Alpro Barista 1L", price: 4.90, discountPercent: 0, unit: "ədəd", rating: 4.9, category: "Market", img: "https://images.unsplash.com/photo-1550583724-b2692b85b150?w=600" },
+  { name: "Nutella Böyük Boy 750g", price: 11.50, discountPercent: 0, unit: "ədəd", rating: 4.9, category: "Market", img: "https://images.unsplash.com/photo-1534938665420-4193effeabd4?w=600" },
+  { name: "Pringles Kartof Çipsi", price: 4.20, discountPercent: 20, unit: "ədəd", rating: 4.7, category: "Market", img: "https://images.unsplash.com/photo-1566478989037-eec170784d0b?w=600" },
+  { name: "Qara Damla Zeytun Pro", price: 5.80, discountPercent: 0, unit: "ədəd", rating: 4.4, category: "Market", img: "https://images.unsplash.com/photo-1541432901042-2d8bd64b4a9b?w=600" },
+  { name: "Coca-Cola Orijinal 1L", price: 1.40, discountPercent: 0, unit: "ədəd", rating: 4.9, category: "İçkilər", img: "https://images.unsplash.com/photo-1622483767028-3f66f32aef97?w=600" },
+  { name: "Red Bull Enerji İçkisi", price: 2.80, discountPercent: 0, unit: "ədəd", rating: 4.8, category: "İçkilər", img: "https://images.unsplash.com/photo-1622543953495-6d7af241997f?w=600" },
+  { name: "Təbii Portağal Şirəsi 1L", price: 3.50, discountPercent: 10, unit: "ədəd", rating: 4.7, category: "İçkilər", img: "https://images.unsplash.com/photo-1613478223719-2ab802602423?w=600" },
+  { name: "Corona Ekstra Pivə", price: 4.50, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Alkoqol", alcohol: true, img: "https://images.unsplash.com/photo-1608270176050-1b7027a73eb8?w=600" },
+  { name: "Heineken Pivə 0.5L", price: 3.80, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Alkoqol", alcohol: true, img: "https://images.unsplash.com/photo-1618183479302-1e0aa382c36b?w=600" },
+  { name: "Chivas Regal 12 Whisky 0.7L", price: 65.00, discountPercent: 0, unit: "ədəd", rating: 4.9, category: "Alkoqol", alcohol: true, img: "https://images.unsplash.com/photo-1569529465841-dfecdab7503b?w=600" },
+  { name: "Qırmızı Şərab Saperavi 0.75L", price: 18.00, discountPercent: 5, unit: "ədəd", rating: 4.6, category: "Alkoqol", alcohol: true, img: "https://images.unsplash.com/photo-1553361371-9b22f78e8b1d?w=600" },
+  { name: "Absolut Vodka 0.7L", price: 28.00, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Alkoqol", alcohol: true, img: "https://images.unsplash.com/photo-1560512823-829485b8bf24?w=600" },
+  { name: "Marlboro Touch Red", price: 6.00, discountPercent: 0, unit: "ədəd", rating: 4.2, category: "Tütün", img: "https://images.unsplash.com/photo-1527137342181-19aab11a8ee1?w=600" },
+  { name: "Heets Silver (Iqos)", price: 5.50, discountPercent: 0, unit: "ədəd", rating: 4.5, category: "Tütün", img: "https://images.unsplash.com/photo-1603006905003-be475563bc59?w=600" },
+  { name: "Parasetamol Tablet (20 ədəd)", price: 2.50, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Aptek", img: "https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=600" },
+  { name: "Vitamin C Şipuçan (1000mg)", price: 6.90, discountPercent: 0, unit: "ədəd", rating: 4.8, category: "Aptek", img: "https://images.unsplash.com/photo-1550572017-edd951b55104?w=600" },
+  { name: "Antiseptik Əl Geli 100ml", price: 3.20, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Aptek", img: "https://images.unsplash.com/photo-1584744982491-665216d95f8b?w=600" },
+  { name: "Tibbi Maska (10 ədəd)", price: 2.00, discountPercent: 0, unit: "ədəd", rating: 4.5, category: "Aptek", img: "https://images.unsplash.com/photo-1584634731339-252c581abfc5?w=600" },
+  { name: "Termometr Rəqəmsal", price: 9.50, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Aptek", img: "https://images.unsplash.com/photo-1584362917165-526a968579e8?w=600" },
+  { name: "Qırmızı Qızılgül Buketi (11 ədəd)", price: 28.00, discountPercent: 0, unit: "ədəd", rating: 4.9, category: "Gül", img: "https://images.unsplash.com/photo-1548586196-aa5803b77379?w=600" },
+  { name: "Pion Buketi Pastel", price: 32.00, discountPercent: 10, unit: "ədəd", rating: 4.8, category: "Gül", img: "https://images.unsplash.com/photo-1526047932273-341f2a7631f9?w=600" },
+  { name: "Orxideya Dibçəkdə", price: 24.00, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Gül", img: "https://images.unsplash.com/photo-1524598171353-e5643e4b6c1a?w=600" },
+  { name: "Qarışıq Fəsil Buketi", price: 19.50, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Gül", img: "https://images.unsplash.com/photo-1490750967868-88aa4486c946?w=600" },
+  { name: "Şam Dəsti + Otkritka", price: 12.00, discountPercent: 0, unit: "ədəd", rating: 4.8, category: "Hədiyyə", img: "https://images.unsplash.com/photo-1513201099705-a9746e1e201f?w=600" },
+  { name: "Şokolad Hədiyyə Qutusu", price: 16.90, discountPercent: 15, unit: "ədəd", rating: 4.9, category: "Hədiyyə", img: "https://images.unsplash.com/photo-1549007994-cb92caebd54b?w=600" },
+  { name: "Parfüm Hədiyyə Dəsti", price: 45.00, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Hədiyyə", img: "https://images.unsplash.com/photo-1541643600914-78b084683601?w=600" },
+  { name: "Sürpriz Balon Dəsti (5 ədəd)", price: 14.50, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Hədiyyə", img: "https://images.unsplash.com/photo-1530103862676-de8c9debad1d?w=600" },
+  { name: "Premium Pişik Yemi Purina", price: 14.00, discountPercent: 0, unit: "ədəd", rating: 4.8, category: "Zoo", img: "https://images.unsplash.com/photo-1589723900969-3a479c7744aa?w=600" },
+  { name: "İt Yemi Pedigree 3kg", price: 16.50, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Zoo", img: "https://images.unsplash.com/photo-1568640347023-a616a30bc3bd?w=600" },
+  { name: "Pişik Qumu 5L", price: 8.90, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Zoo", img: "https://images.unsplash.com/photo-1583511655857-d19b40a7a54e?w=600" },
+  { name: "Uşaq Bezi Pampers Premium", price: 22.50, discountPercent: 0, unit: "ədəd", rating: 4.9, category: "Uşaq", img: "https://images.unsplash.com/photo-1555252333-9f8e92e65df9?w=600" },
+  { name: "Nivea Nəmləndirici Krem", price: 7.20, discountPercent: 0, unit: "ədəd", rating: 4.6, category: "Baxım", img: "https://images.unsplash.com/photo-1601049541289-9b1b7bbbfe19?w=600" },
+  { name: "Qara Sadə Oversize Hoodie", price: 35.00, discountPercent: 0, unit: "ədəd", rating: 4.7, category: "Geyim", img: "https://images.unsplash.com/photo-1556821840-3a63f95609a7?w=600" },
+  { name: "Led İşıqlı LED Masa Lampası", price: 18.00, discountPercent: 0, unit: "ədəd", rating: 4.5, category: "Digər", img: "https://images.unsplash.com/photo-1507473885765-e6ed057f782c?w=600" }
+];
+
+let foods = [...staticFoods];
+// Firestore-dan gələn məhsulları id üzrə saxlayan Map - docChanges() ilə tək-tək
+// yenilənir (əlavə/dəyişiklik/silinmə), 500 restoran × 50+ məhsulda hər dəyişiklikdə
+// bütün siyahının yenidən qurulub müqayisə edilməsinin qarşısını alır.
+let __productsById = new Map();
+let restaurantPhotos = {}; // restaurantId -> photoURL (hər restoranın öz loqosu qarışmasın deyə)
+let restaurantCoords = {}; // restaurantId -> {lat, lng} (Wolt-tərzi məsafəyə görə filter/sort üçün)
+const MAX_DELIVERY_RADIUS_KM = 15; // bu radiusdan uzaq restoranlar göstərilmir
+
+// Aktiv onSnapshot dinləyicilərinin "unsubscribe" funksiyaları. Eyni dinləyici
+// funksiyası (məs. login/logout zamanı) təkrar çağırılanda köhnə listener-i
+// dayandırmadan yenisini başlatsaq, iki paralel listener aktiv qalır - bu həm
+// lazımsız Firestore oxuma xərci, həm də memory leak deməkdir.
+// Köhnə: tək bir __unsubRestaurants (bütün restoranları çəkən TƏK listener).
+// Yeni: geohash sorğusu bir neçə prefiks üçün bir neçə paralel listener açır,
+// ona görə massiv saxlayırıq. __restaurantsFallbackActive true olduqda isə
+// (geohash sahəsi hələ backfill edilməyibsə) köhnə "hamısını çək" üsuluna
+// keçilir - tətbiq heç vaxt boş qalmasın deyə.
+let __restaurantGeohashUnsubs = [];
+let __restaurantsFallbackActive = false;
+let __lastRestaurantQueryCenter = null; // {lat,lng} - lazımsız təkrar sorğunun qarşısını almaq üçün
+let __unsubProducts = null;
+// Wolt-tərzi yeni model: bütün 25,000+ məhsulu YÜKLƏMİRİK. Əvəzinə yalnız
+// müştəriyə YAXIN restoranların ID-lərini tapıb, YALNIZ onların məhsullarını
+// sorğulayırıq (Firestore-un "in" operatoru maks. 30 dəyər dəstəklədiyi üçün
+// 30-luq qruplara bölünür, hər qrup öz onSnapshot dinləyicisinə malikdir).
+let __unsubProductsChunks = [];
+let __allRestaurantIds = new Set(); // koordinatından asılı olmayaraq bütün bilinən restoran ID-ləri
+let __restaurantsLoaded = false;
+let __lastNearbyIdsKey = "";
+let __unsubNotifications = null;
+let __unsubOrderHistory = null;
+let __unsubActiveOrder = null;
+let cartArr = [];
+let selectedProduct = null;
+let qty = 1;
+let currentCategory = "Restoranlar";
+let activeCoupon = null; // { code, discountType: 'percent'|'fixed', discountValue }
+function applyDiscountToAmount(amount){
+  if(!activeCoupon) return amount;
+  if(activeCoupon.discountType === "fixed"){
+    return Math.max(0, amount - activeCoupon.discountValue);
+  }
+  return amount - (amount * activeCoupon.discountValue / 100);
+}
+let reviewsCache = {};
+let selectedReviewStars = 0;
+let activeOrderId = null;
+let activeOrderStatus = null;
+let notificationsCache = [];
+
+// ---- Yaş yoxlaması (Tütün / Alkoqol üçün) ----
+function isAgeRestricted(f){
+  return !!f && (f.category === "Tütün" || f.alcohol === true);
+}
+function isAgeVerified(){
+  return localStorage.getItem("bakugoAgeVerified18") === "true";
+}
+let pendingAgeConfirmCallback = null;
+function requestAgeVerification(onConfirm){
+  pendingAgeConfirmCallback = onConfirm;
+  document.getElementById("ageVerifyModal").classList.add("active");
+}
+window.confirmAgeVerification = function(isAdult){
+  document.getElementById("ageVerifyModal").classList.remove("active");
+  if(isAdult){
+    localStorage.setItem("bakugoAgeVerified18", "true");
+    if(window.currentUser && window.db){
+      try {
+        const { doc, setDoc } = window.firebaseFirestore;
+        setDoc(doc(window.db, "users", window.currentUser.uid), { ageVerified18: true, ageVerifiedAt: new Date() }, { merge: true });
+      } catch(e){}
+    }
+    const cb = pendingAgeConfirmCallback;
+    pendingAgeConfirmCallback = null;
+    if(cb) cb();
+  } else {
+    pendingAgeConfirmCallback = null;
+    if(window.showToast) window.showToast("🔞 18 yaşdan kiçiklər üçün bu məhsullar əlçatan deyil");
+  }
+};
+
+let map;
+let courierMarker;
+let lastEtaCourierLat = null;
+let lastEtaCourierLng = null;
+let lastEtaLeg = null;
+let lastTrackedOrderId = null;
+let lastCourierCoordsFetchId = null;
+
+// Aktiv sifariş bitəndə (çatdırıldı/ləğv edildi) və ya heç aktiv sifariş yoxdursa
+// izləmə panelini təmiz vəziyyətə qaytarır.
+function clearActiveOrderTracking(){
+  stopAllOrderCountdowns();
+  activeOrderId = null;
+  activeOrderStatus = null;
+  lastTrackedOrderId = null;
+  lastEtaCourierLat = null;
+  lastEtaCourierLng = null;
+  lastEtaLeg = null;
+  const mapDiv = document.getElementById("map");
+  if(mapDiv) mapDiv.style.display = "none";
+  const progressEl = document.getElementById("progress");
+  if(progressEl) progressEl.style.width = "0%";
+  const statusTextEl = document.getElementById("statusText");
+  if(statusTextEl) statusTextEl.innerText = "Aktiv sifariş tapılmadı.";
+  const courierBox = document.getElementById("courierContactBox");
+  if(courierBox) courierBox.style.display = "none";
+  const cancelBox = document.getElementById("cancelOrderBox");
+  if(cancelBox) cancelBox.style.display = "none";
+}
+window.clearActiveOrderTracking = clearActiveOrderTracking;
+window.getActiveOrderId = function(){ return activeOrderId; };
+
+function listenToActiveOrder(orderId) {
+    activeOrderId = orderId;
+    if(lastTrackedOrderId !== orderId){
+        // yeni sifariş izlənməyə başlayır - əvvəlki sayğacları sıfırla
+        stopAllOrderCountdowns();
+        lastEtaCourierLat = null;
+        lastEtaCourierLng = null;
+        lastEtaLeg = null;
+        lastTrackedOrderId = orderId;
+    }
+    const mapDiv = document.getElementById("map");
+    mapDiv.style.display = "block";
+
+    if (!map) {
+        map = L.map('map').setView([40.4093, 49.8671], 14);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap'
+        }).addTo(map);
+    }
+
+    const { doc, onSnapshot, getDoc } = window.firebaseFirestore;
+    // Əvvəlki aktiv sifariş dinləyicisini dayandır - istifadəçi başqa sifarişə keçəndə
+    // köhnə listener arxada işləməyə davam etməsin.
+    if(__unsubActiveOrder) { __unsubActiveOrder(); __unsubActiveOrder = null; }
+    __unsubActiveOrder = onSnapshot(doc(db, "orders", orderId), async (docSnap) => {
+        if(docSnap.exists()) {
+            const data = docSnap.data();
+            activeOrderStatus = data.status;
+            
+            document.getElementById("trackRestName").innerText = data.restaurantName || "Bakugo";
+            document.getElementById("trackRestAddress").innerText = data.restaurantAddress || "Bakı";
+            document.getElementById("trackRestPhone").innerText = data.restaurantPhone || "Qeyd olunmayıb";
+            
+            const progressEl = document.getElementById("progress");
+            const statusTextEl = document.getElementById("statusText");
+            
+            if(progressEl) progressEl.style.width = (data.progress || 20) + "%";
+            
+            // Kuryerin real (canlı) koordinatı - sifariş sənədində birbaşa yenilənir (kuryer tətbiqi tərəfindən)
+            let liveCourierLat = (data.lat !== undefined && data.lat !== null) ? parseFloat(data.lat) : null;
+            let liveCourierLng = (data.lng !== undefined && data.lng !== null) ? parseFloat(data.lng) : null;
+
+            if (liveCourierLat && liveCourierLng) {
+                if (!courierMarker) {
+                    courierMarker = L.marker([liveCourierLat, liveCourierLng]).addTo(map);
+                } else {
+                    courierMarker.setLatLng([liveCourierLat, liveCourierLng]);
+                }
+                map.setView([liveCourierLat, liveCourierLng], 15);
+            }
+
+            const courierBox = document.getElementById("courierContactBox");
+            if(data.courierName || data.courierPhone){
+                courierBox.style.display = "block";
+                document.getElementById("courierName").innerText = data.courierName || "Kuryer";
+                courierBox.dataset.phone = data.courierPhone || "";
+            } else {
+                courierBox.style.display = "none";
+            }
+
+            const cancelBox = document.getElementById("cancelOrderBox");
+            if(data.status === "preparing" || data.status === "searching_courier"){
+                cancelBox.style.display = "block";
+            } else {
+                cancelBox.style.display = "none";
+            }
+            
+            if(statusTextEl) {
+                let displayStatus = data.status;
+                if(data.status === "preparing") displayStatus = "🍔 Hazırlanır...";
+                if(data.status === "searching_courier") displayStatus = "🔍 Kuryer Axtarılır...";
+                if(data.status === "courier_accepted") displayStatus = "✅ Kuryer Tərəfindən Qəbul Edildi";
+                if(data.status === "collected") displayStatus = "🛍️ Kuryer Restorandan Təhvil Aldı";
+                if(data.status === "delivered") displayStatus = "🏁 Çatdırıldı";
+                if(data.status === "cancelled") displayStatus = "❌ Sifariş ləğv edildi";
+                statusTextEl.innerText = displayStatus;
+            }
+
+            /* ===== Sayğac məntiqi (tam real, demo yoxdur) =====
+               - "preparing" / "searching_courier": restoranın sabit 3.5 dəq hazırlıq sayğacı (sifarişin
+                 yaradıldığı andan hesablanır - bu, restoranın hazırlaşma vaxtı üçün sabit müddətdir).
+               - "courier_accepted": kuryer sifarişi qəbul edib, hələ restorandan GÖTÜRMƏYİB. Bu mərhələdə
+                 sayğac kuryerin RESTORANA olan real yol məsafəsini göstərir (OSRM marşrutu ilə).
+               - "collected": kuryer "Restorandan təhvil aldım" düyməsini basıb. YALNIZ bu andan etibarən
+                 sayğac kuryerin MÜŞTƏRİYƏ olan real yol məsafəsini göstərir. Əvvəllər bu iki mərhələ
+                 qarışdırılırdı və müştəriyə hələ yolda olmayan kuryerin "sizə çatma vaxtı" göstərilirdi -
+                 indi hər mərhələ öz hədəfinə görə ayrıca hesablanır. */
+            if(data.status === "preparing" || data.status === "searching_courier"){
+                if(!prepCountdownInterval){
+                    const createdMs = (data.createdAt && data.createdAt.seconds)
+                        ? data.createdAt.seconds * 1000
+                        : Date.now();
+                    startPrepCountdown(createdMs);
+                }
+            } else if(data.status === "courier_accepted" || data.status === "collected"){
+                let courierLat = liveCourierLat;
+                let courierLng = liveCourierLng;
+
+                // Kuryerin canlı koordinatı hələ sifarişə düşməyibsə, kuryerin id-si (courierId)
+                // ilə "couriers" kolleksiyasından ilkin koordinatını götürürük.
+                if((!courierLat || !courierLng) && data.courierId && lastCourierCoordsFetchId !== data.courierId + "_" + orderId){
+                    try {
+                        const courierSnap = await getDoc(doc(db, "couriers", data.courierId));
+                        if(courierSnap.exists()){
+                            const cd = courierSnap.data();
+                            const cLat = parseFloat(cd.lat ?? cd.courierLat ?? cd.currentLat);
+                            const cLng = parseFloat(cd.lng ?? cd.courierLng ?? cd.currentLng);
+                            if(!isNaN(cLat) && !isNaN(cLng)){
+                                courierLat = cLat;
+                                courierLng = cLng;
+                            }
+                        }
+                    } catch(e){
+                        console.error("Kuryer koordinatı alınmadı:", e);
+                    }
+                    lastCourierCoordsFetchId = data.courierId + "_" + orderId;
+                }
+
+                const leg = data.status === "collected" ? "toCustomer" : "toRestaurant";
+                const destLat = leg === "toCustomer" ? parseFloat(data.customerLat) : parseFloat(data.restaurantLat);
+                const destLng = leg === "toCustomer" ? parseFloat(data.customerLng) : parseFloat(data.restaurantLng);
+
+                // leg də dəyişiklik siyahısına daxildir ki, "təhvil aldım" basılan an (courier_accepted -> collected)
+                // sayğac dərhal restoran hədəfindən müştəri hədəfinə keçsin, eyni koordinatda qalsa belə.
+                const coordsChanged = (courierLat !== lastEtaCourierLat) || (courierLng !== lastEtaCourierLng) || (leg !== lastEtaLeg);
+                if(courierLat && courierLng && !isNaN(destLat) && !isNaN(destLng) && (coordsChanged || !etaCountdownInterval)){
+                    lastEtaCourierLat = courierLat;
+                    lastEtaCourierLng = courierLng;
+                    lastEtaLeg = leg;
+                    startCourierEtaCountdown(courierLat, courierLng, destLat, destLng, leg);
+                }
+            } else {
+                stopAllOrderCountdowns();
+            }
+        }
+    });
+}
+window.listenToActiveOrder = listenToActiveOrder;
+
+function callCourier(){
+  const box = document.getElementById("courierContactBox");
+  const phone = box.dataset.phone;
+  if(!phone){ showToast("❌ Kuryer nömrəsi yoxdur"); return; }
+  window.location.href = "tel:" + phone;
+}
+function messageCourier(){
+  const box = document.getElementById("courierContactBox");
+  const phone = box.dataset.phone;
+  if(!phone){ showToast("❌ Kuryer nömrəsi yoxdur"); return; }
+  window.open("https://wa.me/" + phone.replace(/[^0-9]/g,''), "_blank");
+}
+
+async function cancelActiveOrder(){
+  if(!activeOrderId) return;
+  if(!confirm("Sifarişi ləğv etmək istədiyinizə əminsiniz?")) return;
+  try {
+    const { doc, updateDoc } = window.firebaseFirestore;
+    await updateDoc(doc(db, "orders", activeOrderId), { status: "cancelled", progress: 0 });
+    showToast("❌ Sifariş ləğv edildi");
+    document.getElementById("cancelOrderBox").style.display = "none";
+    stopAllOrderCountdowns();
+  } catch(e){ showToast("❌ Xəta: sifariş ləğv edilmədi"); }
+}
+
+function selectCategory(catName, explicitEl) {
+  const eventTarget = explicitEl || (typeof event !== "undefined" && event ? event.currentTarget : null);
+
+  if((catName === "Tütün" || catName === "Alkoqol") && !isAgeVerified()){
+    requestAgeVerification(function(){ selectCategory(catName, eventTarget); });
+    return;
+  }
+
+  currentCategory = catName;
+  document.getElementById("search").value = "";
+  document.querySelectorAll(".cat").forEach(c => c.classList.remove("active"));
+
+  if(eventTarget) eventTarget.classList.add("active");
+  else {
+    document.querySelectorAll(".cat").forEach(c => {
+      if(c.innerText.includes(catName)) c.classList.add("active");
+    });
+  }
+
+  render();
+  navigator.vibrate?.(30);
+}
+
+function applyCoupon() {
+  const code = document.getElementById("couponInput").value.trim().toUpperCase();
+  if(!code){ showToast("❌ Kupon kodunu daxil edin"); return; }
+  const promos = window.promoCodesCache || [];
+  const match = promos.find(p => (p.code || "").toUpperCase() === code);
+  if(!match){ showToast("❌ Yanlış kupon kodu"); return; }
+
+  let subtotal = 0;
+  cartArr.forEach(item => subtotal += item.price);
+  if(match.minOrderAmount > 0 && subtotal < match.minOrderAmount){
+    showToast(`❌ Minimum sifariş məbləği ${match.minOrderAmount} AZN olmalıdır`);
+    return;
+  }
+
+  activeCoupon = { code: match.code, discountType: match.discountType, discountValue: match.discountValue };
+  const label = match.discountType === "fixed" ? `${match.discountValue} AZN` : `${match.discountValue}%`;
+  showToast(`🎉 ${label} endirim tətbiq olundu!`);
+  calculateTotal();
+}
+
+function updateOrderButton(){
+  const cartCountEl = document.getElementById("cartCount");
+  if(cartCountEl) cartCountEl.innerText = cartArr.length;
+  
+  const empty = document.getElementById("emptyCart");
+  if(cartArr.length > 0){
+    if(empty) empty.style.display = "none";
+  }else{
+    if(empty) empty.style.display = "block";
+  }
+  const btn = document.getElementById("orderBtn");
+  if(btn) {
+    if(cartArr.length > 0){
+      btn.style.opacity = "1";
+      btn.style.pointerEvents = "auto";
+    }else{
+      btn.style.opacity = "0.5";
+      btn.style.pointerEvents = "none";
+    }
+  }
+}
+
+function calculateTotal() {
+  let subtotal = 0;
+  cartArr.forEach(item => subtotal += item.price);
+  const discounted = Math.max(0, applyDiscountToAmount(subtotal));
+  const deliveryFee = discounted === 0 ? 0 : (discounted < MIN_ORDER_THRESHOLD ? DELIVERY_FEE_LOW : DELIVERY_FEE_HIGH);
+  const grandTotal = discounted + deliveryFee;
+
+  const discountLabel = activeCoupon
+    ? (activeCoupon.discountType === "fixed" ? `${activeCoupon.discountValue} AZN` : `${activeCoupon.discountValue}%`)
+    : "";
+
+  const breakdown = document.getElementById("cartBreakdown");
+  if(breakdown){
+    breakdown.innerHTML = cartArr.length ? `
+      <div style="display:flex;justify-content:space-between;"><span>Məhsullar:</span><span>${subtotal.toFixed(2)} AZN</span></div>
+      ${activeCoupon ? `<div style="display:flex;justify-content:space-between;color:var(--orange);"><span>Endirim (-${discountLabel}):</span><span>-${(subtotal-discounted).toFixed(2)} AZN</span></div>` : ""}
+      <div style="display:flex;justify-content:space-between;"><span>Çatdırılma:</span><span>${deliveryFee === 0 ? "Pulsuz 🎉" : deliveryFee.toFixed(2) + " AZN"}</span></div>
+    ` : "";
+  }
+  document.getElementById("total").innerText = grandTotal.toFixed(2) + " AZN";
+  return { subtotal, discounted, deliveryFee, grandTotal };
+}
+
+function getEffectivePrice(food){
+  if(food.discountPercent > 0){
+    return +(food.price - (food.price * food.discountPercent / 100)).toFixed(2);
+  }
+  return food.price;
+}
+
+function add(i){
+  const original = foods[i];
+  if(isAgeRestricted(original) && !isAgeVerified()){
+    requestAgeVerification(function(){ add(i); });
+    return;
+  }
+  cartArr.push({ ...original, price: getEffectivePrice(original), originalPrice: original.price });
+  if(window.syncCartToFirebase) window.syncCartToFirebase();
+  renderCartItems();
+  showToast();
+  navigator.vibrate?.(50);
+}
+
+function removeCart(index){
+  cartArr.splice(index,1);
+  if(window.syncCartToFirebase) window.syncCartToFirebase();
+  renderCartItems();
+  showToast("❌ Məhsul silindi");
+}
+
+function changeCartItemQty(itemName, amount) {
+  if (amount > 0) {
+    const foundIdx = foods.findIndex(f => f.name === itemName);
+    if (foundIdx !== -1) {
+      const original = foods[foundIdx];
+      cartArr.push({ ...original, price: getEffectivePrice(original), originalPrice: original.price });
+    }
+  } else {
+    const foundIdx = cartArr.findIndex(item => item.name === itemName);
+    if (foundIdx !== -1) cartArr.splice(foundIdx, 1);
+  }
+  if(window.syncCartToFirebase) window.syncCartToFirebase();
+  renderCartItems();
+}
+
+function renderCartItems() {
+  const cartItems = document.getElementById("cartItems");
+  if(!cartItems) return;
+  cartItems.innerHTML = "";
+  
+  const groupedCart = {};
+  cartArr.forEach(item => {
+    if (!groupedCart[item.name]) {
+      groupedCart[item.name] = { ...item, count: 0, totalPrice: 0 };
+    }
+    groupedCart[item.name].count++;
+    groupedCart[item.name].totalPrice += item.price;
+  });
+
+  // Hər maddəni ayrıca "+=" ilə DOM-a yazmaq əvəzinə, əvvəlcə tək string-də
+  // yığırıq və sonda BİR dəfə innerHTML-ə veririk - səbətdə çox məhsul olanda
+  // hər maddədə bütün siyahının təzədən parse/reflow olunmasının qarşısını alır.
+  let cartHtml = "";
+  Object.values(groupedCart).forEach(item => {
+    const isDiscounted = item.discountPercent > 0 && item.originalPrice > item.price;
+    const priceLine = isDiscounted
+      ? `<span class="original-price">${item.originalPrice.toFixed(2)} AZN</span> <span class="discount-tag">-${item.discountPercent}%</span> ${item.price.toFixed(2)} AZN × ${item.count} = ${item.totalPrice.toFixed(2)} AZN`
+      : `${item.price.toFixed(2)} AZN × ${item.count} = ${item.totalPrice.toFixed(2)} AZN`;
+    cartHtml += `
+      <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 0;padding:10px;background:#0e0e0e;border-radius:12px;">
+        <div>
+          <div style="font-weight:bold;">${item.name}</div>
+          <div style="font-size:13px;opacity:.7;margin-top:4px;">${priceLine}</div>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <button onclick="changeCartItemQty('${item.name}', -1)" style="width:28px;height:28px;border:none;border-radius:8px;background:#333;color:#fff;cursor:pointer;font-weight:bold;">−</button>
+          <span style="font-weight:bold;min-width:15px;text-align:center;">${item.count}</span>
+          <button onclick="changeCartItemQty('${item.name}', 1)" style="width:28px;height:28px;border:none;border-radius:8px;background:var(--orange);color:#fff;cursor:pointer;font-weight:bold;">+</button>
+        </div>
+      </div>
+    `;
+  });
+  cartItems.innerHTML = cartHtml;
+  calculateTotal();
+  updateOrderButton();
+}
+
+let favorites = JSON.parse(localStorage.getItem("favorites")) || [];
+
+async function syncFavoritesToFirebase(){
+  if(!window.currentUser) return;
+  const { doc, setDoc } = window.firebaseFirestore;
+  try { await setDoc(doc(db, "favorites", window.currentUser.uid), { items: favorites }); } catch(e){}
+}
+
+function toggleFav(el,index){
+  el.classList.toggle("active");
+  const food = foods[index];
+  if(el.classList.contains("active")){
+    favorites.push(food);
+    showToast("❤ Favorilərə əlavə edildi");
+  }else{
+    favorites = favorites.filter(f=>f.name !== food.name);
+    showToast("❌ Favorilərdən silindi");
+  }
+  localStorage.setItem("favorites", JSON.stringify(favorites));
+  syncFavoritesToFirebase();
+  renderFavorites();
+}
+
+function renderFavorites(){
+  const box = document.getElementById("favoritesList");
+  if(!box) return;
+  if(favorites.length === 0){
+    box.innerHTML = `<div style="text-align:center;padding:30px;opacity:.6;">Favori məhsul yoxdur</div>`;
+    return;
+  }
+  box.innerHTML = "";
+  let favHtml = "";
+  favorites.forEach(f=>{
+    favHtml += `
+      <div class="notif-top">
+        <img src="${optimizeImg(f.img, 400)}" style="width:100%;height:120px;object-fit:cover;border-radius:10px;" loading="lazy" decoding="async" onerror="this.onerror=null;this.src='https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=400';">
+        <h3 style="margin-top:10px;">${f.name}</h3>
+        <div class="rating">⭐ ${f.rating || '5.0'}</div>
+        <div class="price">${f.price.toFixed(2)} AZN / ${f.unit || 'ədəd'}</div>
+      </div>
+    `;
+  });
+  box.innerHTML = favHtml;
+}
+
+function getAvgRating(foodName){
+  const list = reviewsCache[foodName];
+  if(!list || list.length === 0) return null;
+  const avg = list.reduce((s,r)=>s+r.stars,0) / list.length;
+  return avg.toFixed(1);
+}
+
+function setupStarInput(){
+  const stars = document.querySelectorAll("#reviewStars span");
+  stars.forEach(s=>{
+    s.onclick = () => {
+      selectedReviewStars = parseInt(s.dataset.v);
+      stars.forEach(st=>{
+        st.classList.toggle("active", parseInt(st.dataset.v) <= selectedReviewStars);
+      });
+    };
+  });
+}
+setupStarInput();
+
+async function loadReviews(foodName){
+  const { collection, query, where, onSnapshot } = window.firebaseFirestore;
+  if(!window.db) return;
+  const q = query(collection(db, "reviews"), where("productName", "==", foodName));
+  onSnapshot(q, (snap)=>{
+    const list = [];
+    snap.forEach(d=>list.push(d.data()));
+    reviewsCache[foodName] = list;
+    renderReviews(foodName);
+  });
+}
+
+function renderReviews(foodName){
+  const box = document.getElementById("modalReviews");
+  if(!box) return;
+  const list = reviewsCache[foodName] || [];
+  if(list.length === 0){
+    box.innerHTML = `<p style="opacity:.6;font-size:13px;margin-top:8px;">Hələ rəy yoxdur. İlk rəyi siz yazın!</p>`;
+    return;
+  }
+  box.innerHTML = list.map(r => `
+    <div class="review-item">
+      <div style="color:#ffd700;">${"★".repeat(r.stars)}${"☆".repeat(5-r.stars)}</div>
+      <div style="font-size:13px;margin-top:5px;">${r.text || ""}</div>
+      <div style="font-size:11px;opacity:.5;margin-top:5px;">${r.userName || "İstifadəçi"}</div>
+    </div>
+  `).join("");
+}
+
+async function submitReview(){
+  if(!window.currentUser){ showToast("❌ Rəy üçün daxil olun"); return; }
+  if(selectedReviewStars === 0){ showToast("❌ Ulduz seçin"); return; }
+  const text = document.getElementById("reviewText").value.trim();
+  try {
+    const { collection, addDoc } = window.firebaseFirestore;
+    await addDoc(collection(db, "reviews"), {
+      productName: selectedProduct.name,
+      stars: selectedReviewStars,
+      text: text,
+      userId: window.currentUser.uid,
+      userName: document.getElementById("name").value || "İstifadəçi",
+      createdAt: new Date()
+    });
+    document.getElementById("reviewText").value = "";
+    selectedReviewStars = 0;
+    document.querySelectorAll("#reviewStars span").forEach(s=>s.classList.remove("active"));
+    showToast("⭐ Rəyiniz göndərildi");
+  } catch(e){ showToast("❌ Rəy göndərilmədi"); }
+}
+
+function openProduct(i){
+  const f = foods[i];
+  if(isAgeRestricted(f) && !isAgeVerified()){
+    requestAgeVerification(function(){ openProduct(i); });
+    return;
+  }
+  selectedProduct = f;
+  document.getElementById("productModal").classList.add("active");
+  document.getElementById("modalImg").src = optimizeImg(selectedProduct.img, 800);
+  document.getElementById("modalName").innerText = selectedProduct.name;
+  document.getElementById("modalRating").innerText = "⭐ " + (getAvgRating(selectedProduct.name) || selectedProduct.rating || '5.0');
+  const modalPriceEl = document.getElementById("modalPrice");
+  if(selectedProduct.discountPercent > 0){
+    const discounted = getEffectivePrice(selectedProduct);
+    modalPriceEl.innerHTML = `<span class="original-price" style="font-size:15px;">${selectedProduct.price.toFixed(2)} AZN</span> <span class="discount-tag">-${selectedProduct.discountPercent}%</span><br>${discounted.toFixed(2)} AZN / ${selectedProduct.unit || "ədəd"}`;
+  } else {
+    modalPriceEl.innerText = selectedProduct.price.toFixed(2) + " AZN / " + (selectedProduct.unit || "ədəd");
+  }
+  qty = 1;
+  document.getElementById("qty").innerText = qty;
+  selectedReviewStars = 0;
+  document.querySelectorAll("#reviewStars span").forEach(s=>s.classList.remove("active"));
+  document.getElementById("reviewText").value = "";
+  renderReviews(selectedProduct.name);
+  loadReviews(selectedProduct.name);
+}
+function closeProduct(){ document.getElementById("productModal").classList.remove("active"); }
+function changeQty(num){
+  qty += num;
+  if(qty < 1) qty = 1;
+  document.getElementById("qty").innerText = qty;
+}
+function addModalToCart(){
+  if(isAgeRestricted(selectedProduct) && !isAgeVerified()){
+    requestAgeVerification(function(){ addModalToCart(); });
+    return;
+  }
+  const effectivePrice = getEffectivePrice(selectedProduct);
+  for(let i=0;i<qty;i++){ cartArr.push({ ...selectedProduct, price: effectivePrice, originalPrice: selectedProduct.price }); }
+  if(window.syncCartToFirebase) window.syncCartToFirebase();
+  renderCartItems();
+  showToast("🛒 Məhsul səbətə əlavə edildi");
+  closeProduct();
+  toggleCart();
+}
+
+window.selectedPaymentMethod = localStorage.getItem("bakugoPaymentMethod") || "cash";
+window.addressNote = localStorage.getItem("bakugoAddressNote") || "";
+function renderAddressNoteBox(){
+  const editBox = document.getElementById("addressNoteEdit");
+  const viewBox = document.getElementById("addressNoteView");
+  if(!editBox || !viewBox) return;
+  if(window.addressNote && window.addressNote.trim().length > 0){
+    document.getElementById("addressNoteText").innerText = window.addressNote;
+    editBox.style.display = "none";
+    viewBox.style.display = "block";
+  } else {
+    editBox.style.display = "block";
+    viewBox.style.display = "none";
+  }
+}
+window.saveAddressNote = function(){
+  const input = document.getElementById("addressNoteInput");
+  const err = document.getElementById("addressNoteErr");
+  const val = input.value.trim();
+  if(!val){
+    err.classList.add("show");
+    input.focus();
+    return;
+  }
+  err.classList.remove("show");
+  window.addressNote = val;
+  localStorage.setItem("bakugoAddressNote", val);
+  renderAddressNoteBox();
+  if(window.showToast) window.showToast("✅ Ev/Mənzil/Blok qeydi yadda saxlanıldı");
+};
+window.editAddressNote = function(){
+  document.getElementById("addressNoteInput").value = window.addressNote;
+  document.getElementById("addressNoteEdit").style.display = "block";
+  document.getElementById("addressNoteView").style.display = "none";
+};
+document.addEventListener("DOMContentLoaded", renderAddressNoteBox);
+function paymentMethodLabel(type){
+  if(type === "cash") return "Nağd";
+  if(type === "card") return "Kart";
+  if(type === "googlepay") return "Google Pay";
+  return "Nağd";
+}
+function refreshPaymentUI(){
+  const map = { cash:"payOptCash", card:"payOptCard", googlepay:"payOptGpay" };
+  Object.keys(map).forEach(key => {
+    const el = document.getElementById(map[key]);
+    if(el) el.classList.toggle("pay-selected", key === window.selectedPaymentMethod);
+  });
+}
+function selectPayment(type){
+  window.selectedPaymentMethod = type;
+  localStorage.setItem("bakugoPaymentMethod", type);
+  document.getElementById("cardForm").style.display = (type==="card") ? "block" : "none";
+  refreshPaymentUI();
+}
+document.addEventListener("DOMContentLoaded", refreshPaymentUI);
+
+function setMode(mode){
+  document.documentElement.setAttribute('data-theme', mode);
+  localStorage.setItem("displayMode", mode);
+  updateModeButtons(mode);
+}
+
+function updateModeButtons(mode){
+  const lightBtn = document.getElementById("lightModeBtn");
+  const darkBtn = document.getElementById("darkModeBtn");
+  if(!lightBtn || !darkBtn) return;
+  lightBtn.style.background = (mode === 'light') ? 'var(--orange)' : '';
+  darkBtn.style.background = (mode === 'dark') ? 'var(--orange)' : '';
+}
+
+function luhnCheck(num){
+  let arr = (num+'').split('').reverse().map(x=>parseInt(x));
+  let sum = arr.reduce((acc,val,i)=>{
+    if(i % 2 !== 0){ val *= 2; if(val > 9) val -= 9; }
+    return acc + val;
+  },0);
+  return sum % 10 === 0 && arr.length >= 13;
+}
+
+function saveCard(){
+  const numRaw = document.getElementById("cardNumber").value.replace(/\s/g,'');
+  const expiry = document.getElementById("expiry").value;
+  const cvc = document.getElementById("cvc").value;
+  const numErr = document.getElementById("cardNumberErr");
+  const extraErr = document.getElementById("cardExtraErr");
+  let valid = true;
+
+  if(!luhnCheck(numRaw)){
+    numErr.classList.add("show");
+    document.getElementById("cardNumber").classList.add("invalid");
+    valid = false;
+  } else {
+    numErr.classList.remove("show");
+    document.getElementById("cardNumber").classList.remove("invalid");
+  }
+
+  const expMatch = expiry.match(/^(\d{2})\/(\d{2})$/);
+  let expValid = false;
+  if(expMatch){
+    const mm = parseInt(expMatch[1]), yy = parseInt(expMatch[2]);
+    const now = new Date();
+    const curYY = now.getFullYear() % 100, curMM = now.getMonth()+1;
+    if(mm >= 1 && mm <= 12 && (yy > curYY || (yy === curYY && mm >= curMM))) expValid = true;
+  }
+  if(!expValid || cvc.length !== 3){
+    extraErr.classList.add("show");
+    valid = false;
+  } else {
+    extraErr.classList.remove("show");
+  }
+
+  if(!valid){ showToast("❌ Kart məlumatlarını yoxlayın"); return; }
+  showToast("💳 Kart əlavə edildi");
+}
+
+const cardNumberInput = document.getElementById("cardNumber");
+const cardHolderInput = document.getElementById("cardHolder");
+const expiryInput = document.getElementById("expiry");
+
+if(cardNumberInput){
+  cardNumberInput.addEventListener("input",(e)=>{
+    let value = e.target.value.replace(/\s/g,'').replace(/[^0-9]/gi,'');
+    let formatted = value.match(/.{1,4}/g)?.join(" ") || value;
+    e.target.value = formatted;
+    document.getElementById("liveNumber").innerText = formatted || "#### #### #### ####";
+    let bank = "BANK";
+    if(value.startsWith("4")) bank = "VISA";
+    else if(value.startsWith("5")) bank = "MASTERCARD";
+    document.getElementById("bankName").innerText = bank;
+  });
+  cardHolderInput.addEventListener("input",(e)=>{ document.getElementById("liveName").innerText = e.target.value || "AD SOYAD"; });
+  expiryInput.addEventListener("input",(e)=>{
+    let value = e.target.value.replace(/\D/g,'');
+    if(value.length >= 2){ value = value.substring(0,2) + "/" + value.substring(2,4); }
+    e.target.value = value;
+    document.getElementById("liveExpiry").innerText = value || "MM/YY";
+  });
+}
+
+function showToast(text="Səbətə əlavə edildi 🛒"){
+  const t = document.getElementById("toast");
+  t.innerText=text; t.style.display="block";
+  setTimeout(()=>t.style.display="none",1200);
+}
+
+function isValidEmail(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+function isValidAzPhone(v){ return /^\+994\d{9}$/.test(v.replace(/\s/g,'')); }
+
+function saveUser(){
+  const phone = document.getElementById("phoneInput").value;
+  const mail = document.getElementById("mailInput").value;
+  const phoneErr = document.getElementById("phoneInputErr");
+  const mailErr = document.getElementById("mailInputErr");
+
+  let ok = true;
+  if(phone && !isValidAzPhone(phone)){
+    phoneErr.classList.add("show"); document.getElementById("phoneInput").classList.add("invalid"); ok = false;
+  } else { phoneErr.classList.remove("show"); document.getElementById("phoneInput").classList.remove("invalid"); }
+
+  if(mail && !isValidEmail(mail)){
+    mailErr.classList.add("show"); document.getElementById("mailInput").classList.add("invalid"); ok = false;
+  } else { mailErr.classList.remove("show"); document.getElementById("mailInput").classList.remove("invalid"); }
+
+  localStorage.setItem("name", document.getElementById("name").value);
+  localStorage.setItem("surname", document.getElementById("surnameInput").value);
+  localStorage.setItem("phone", phone);
+  localStorage.setItem("mail", mail);
+  return ok;
+}
+function save(){
+  if(!saveUser()){ showToast("❌ Məlumatları yoxlayın"); return; }
+  if(window.syncUserProfile) window.syncUserProfile();
+  showToast("✅ Yadda saxlanıldı");
+}
+
+(function(){
+  document.getElementById("name").value = localStorage.getItem("name") || "";
+  document.getElementById("surnameInput").value = localStorage.getItem("surname") || "";
+  document.getElementById("phoneInput").value = localStorage.getItem("phone") || "";
+  document.getElementById("mailInput").value = localStorage.getItem("mail") || "";
+  const savedMode = localStorage.getItem("displayMode") || "light";
+  document.documentElement.setAttribute('data-theme', savedMode);
+  updateModeButtons(savedMode);
+})();
+
+function openChat(){ document.getElementById("chatPanel").classList.toggle("active"); }
+function sendMessage(){
+  const input = document.getElementById("chatInput");
+  const messages = document.getElementById("chatMessages");
+  const text = input.value.trim();
+  if(!text) return;
+
+  messages.innerHTML += `<div style="margin:10px 0;display:flex;justify-content:flex-end;"><div style="background:var(--orange);padding:12px;border-radius:14px;max-width:80%;">${text}</div></div>`;
+  input.value = ""; messages.scrollTop = messages.scrollHeight;
+
+  setTimeout(()=>{
+    let reply = "Bağışlayın, tam başa düşmədim. Ətraflı məlumat üçün 📚 Məlumat Mərkəzinə baxa bilərsiniz və ya bizimlə +994702484852 nömrəsi ilə əlaqə saxlaya bilərsiniz.";
+    const msg = text.toLowerCase();
+    if(msg.includes("ləğv")) reply = "❌ Sifarişi ləğv etmək üçün 'Sifarişlər (İzləmə)' bölməsinə keçin — sifariş hələ hazırlanma mərhələsindədirsə ləğv edə bilərsiniz.";
+    else if(msg.includes("sifariş")) reply = "📦 Sifarişiniz hazırlanır və tezliklə kuryerə təqdim olunacaq. Statusu 'Sifarişlər (İzləmə)' bölməsindən izləyə bilərsiniz.";
+    else if(msg.includes("çatdırılma")) reply = "🚚 Çatdırılma müddəti orta hesabla 15-35 dəqiqədir. Sifariş 12 AZN-dən aşağı olduqda çatdırılma haqqı 4 AZN, 12 AZN və yuxarı olduqda isə 2.5 AZN-dir.";
+    else if(msg.includes("ödəmə") || msg.includes("kart")) reply = "💳 Visa, MasterCard və nağd ödəniş qəbul edilir.";
+    else if(msg.includes("kupon")) reply = "🎁 Aktiv kupon: BAKUGO20 (20% endirim). Kampaniyalar bölməsindən aktiv edə bilərsiniz.";
+    else if(msg.includes("kuryer")) reply = "🛵 Kuryerlə əlaqə sifariş izləmə panelindəki 'Zəng et' düyməsindən mümkündür.";
+    else if(msg.includes("salam")) reply = "👋 Salam, sizə necə kömək edə bilərəm?";
+    
+    messages.innerHTML += `<div style="margin:10px 0;display:flex;justify-content:flex-start;"><div style="background:#0e0e0e;padding:12px;border-radius:14px;max-width:80%;">${reply}</div></div>`;
+    messages.scrollTop = messages.scrollHeight;
+  },700);
+}
+
+function callSupport(){ window.location.href = "tel:+994702484852"; }
+function openWhatsApp(){ window.open("https://wa.me/994702484852", "_blank"); }
+function openHelp(){ toggleHelp(); }
+
+function openLogin(){
+  document.getElementById("authMenu").style.display = "none";
+  document.getElementById("loginBox").style.display = "block";
+}
+function openRegister(){
+  document.getElementById("authMenu").style.display = "none";
+  document.getElementById("registerBox").style.display = "block";
+}
+function backAuth(){
+  document.getElementById("authMenu").style.display = "block";
+  document.getElementById("loginBox").style.display = "none";
+  document.getElementById("registerBox").style.display = "none";
+}
+
+const canvas = document.getElementById("bg");
+const ctx = canvas.getContext("2d");
+canvas.width = window.innerWidth; canvas.height = window.innerHeight;
+let particles = [];
+const particleColors = ["rgba(150,100,20,0.55)","rgba(120,75,15,0.5)","rgba(200,140,40,0.5)"];
+for(let i=0;i<40;i++){
+  particles.push({x: Math.random()*canvas.width, y: Math.random()*canvas.height, r: Math.random()*2.2+1, dx: (Math.random()-0.5)*0.6, dy: (Math.random()-0.5)*0.6, color: particleColors[Math.floor(Math.random()*particleColors.length)]});
+}
+function animate(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  particles.forEach(p=>{
+    p.x += p.dx; p.y += p.dy;
+    if(p.x<0||p.x>canvas.width) p.dx*=-1;
+    if(p.y<0||p.y>canvas.height) p.dy*=-1;
+    ctx.beginPath(); ctx.arc(p.x,p.y,p.r,0,Math.PI*2); ctx.fillStyle=p.color; ctx.shadowBlur=3; ctx.shadowColor=p.color; ctx.fill();
+  });
+  requestAnimationFrame(animate);
+}
+animate();
+
+const glow = document.querySelector(".cursor-glow");
+document.addEventListener("mousemove",(e)=>{ if(glow) { glow.style.left = e.clientX + "px"; glow.style.top = e.clientY + "px"; } });
+
+let searchDebounceTimer;
+document.getElementById("search").addEventListener("input",(e)=>{
+  clearTimeout(searchDebounceTimer);
+  const val = e.target.value;
+  searchDebounceTimer = setTimeout(()=>render(val, val.trim().length > 0), 220);
+});
+
+function renderNotifications(){
+  const box = document.getElementById("notifList");
+  if(!box) return;
+  if(notificationsCache.length === 0){
+    box.innerHTML = `<div style="text-align:center;padding:30px;opacity:.6;">Bildiriş yoxdur</div>`;
+    return;
+  }
+  const readIds = JSON.parse(localStorage.getItem("readNotifIds") || "[]");
+  box.innerHTML = notificationsCache.map(n => {
+    const isUnread = !readIds.includes(n.id);
+    const time = n.createdAt ? new Date(n.createdAt.seconds ? n.createdAt.seconds*1000 : n.createdAt).toLocaleString() : "";
+    return `
+      <div class="notif-item ${isUnread ? 'unread' : ''}">
+        <strong>${n.title || 'Bildiriş'}</strong>
+        <div style="font-size:13px;margin-top:5px;opacity:.85;">${n.body || ''}</div>
+        <div class="notif-time">${time}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderPromoCodesList(){
+  const box = document.getElementById("promoCodesList");
+  if(!box) return;
+  const promos = window.promoCodesCache || [];
+  if(promos.length === 0){
+    box.innerHTML = `<div style="text-align:center;padding:20px 0;opacity:.6;">Hazırda aktiv kampaniya yoxdur</div>`;
+    return;
+  }
+  const readIds = JSON.parse(localStorage.getItem("readPromoIds") || "[]");
+  box.innerHTML = promos.map(p => {
+    const isNew = !readIds.includes(p.id);
+    const discountLabel = p.discountType === "fixed"
+      ? `${p.discountValue} AZN endirim`
+      : `${p.discountValue}% endirim`;
+    const minOrderLabel = p.minOrderAmount > 0 ? ` · min. sifariş ${p.minOrderAmount} AZN` : "";
+    return `
+      <div class="notif-item ${isNew ? 'unread' : ''}" style="cursor:pointer;" onclick="document.getElementById('couponInput').value='${p.code}';">
+        <strong>🎁 ${p.code}</strong>
+        <div style="font-size:13px;margin-top:5px;opacity:.85;">${discountLabel}${minOrderLabel}</div>
+      </div>
+    `;
+  }).join("");
+}
+window.renderPromoCodesList = renderPromoCodesList;
+
+function markNotificationsRead(){
+  const ids = notificationsCache.map(n => n.id);
+  localStorage.setItem("readNotifIds", JSON.stringify(ids));
+}
+
+// Promo kodların "oxunmuş" siyahısı - hansı kodları istifadəçi artıq görüb.
+// Kampaniyalar paneli açılanda bütün hazırkı kodlar "oxunmuş" sayılır və
+// ☰ menyu ilə "🎁 Kampaniyalar" düyməsi üzərindəki qırmızı nişan itir.
+function markPromoCodesRead(){
+  const ids = (window.promoCodesCache || []).map(p => p.id);
+  localStorage.setItem("readPromoIds", JSON.stringify(ids));
+  updatePromoBadges();
+}
+
+function updatePromoBadges(){
+  const readIds = JSON.parse(localStorage.getItem("readPromoIds") || "[]");
+  const unread = (window.promoCodesCache || []).filter(p => !readIds.includes(p.id)).length;
+  const menuBadge = document.getElementById("menuBadge");
+  const campaignsMenuBadge = document.getElementById("campaignsMenuBadge");
+  [menuBadge, campaignsMenuBadge].forEach(el => {
+    if(!el) return;
+    if(unread > 0){
+      el.innerText = unread;
+      el.style.display = "flex";
+    } else {
+      el.style.display = "none";
+    }
+  });
+}
+</script>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
+  import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, GoogleAuthProvider, OAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged, sendPasswordResetEmail, EmailAuthProvider, reauthenticateWithCredential, reauthenticateWithPopup, deleteUser } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
+  import * as firestoreModule from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
+
+  window.firebaseFirestore = firestoreModule;
+  const { getFirestore, doc, setDoc, getDoc, deleteDoc, collection, addDoc, query, where, onSnapshot, orderBy, updateDoc, limit } = firestoreModule;
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBQIDfObXpxNa1hVAYDmigSi9u49y_BJQc",
+    authDomain: "bkaugo.firebaseapp.com",
+    projectId: "bkaugo",
+    storageBucket: "bkaugo.firebasestorage.app",
+    messagingSenderId: "568740538737",
+    appId: "1:568740538737:web:9b2ab40d0b728789a1aed0",
+    measurementId: "G-44T95W0PSX"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const auth = getAuth(app);
+  const db = getFirestore(app);
+
+  window.db = db;
+  window.currentUser = null;
+
+  window.openForgotPassword = function() {
+    const modal = document.getElementById("pwModal");
+    const prefill = document.getElementById("loginEmail").value.trim();
+    document.getElementById("pwResetEmail").value = prefill;
+    document.getElementById("pwForm").classList.remove("hide");
+    document.getElementById("pwSuccess").classList.remove("show");
+    document.getElementById("pwResetErr").classList.remove("show");
+    modal.classList.add("active");
+  };
+  window.closeForgotPassword = function() {
+    document.getElementById("pwModal").classList.remove("active");
+  };
+  // Hesabım bölməsindən (istifadəçi artıq daxil olub) şifrə sıfırlama linki göndərmək üçün.
+  window.accountResetPassword = function() {
+    const modal = document.getElementById("pwModal");
+    const mailField = document.getElementById("mailInput");
+    const prefill = (mailField && mailField.value.trim()) || (window.currentUser && window.currentUser.email) || "";
+    document.getElementById("pwResetEmail").value = prefill;
+    document.getElementById("pwForm").classList.remove("hide");
+    document.getElementById("pwSuccess").classList.remove("show");
+    document.getElementById("pwResetErr").classList.remove("show");
+    modal.classList.add("active");
+  };
+  window.sendResetLink = async function() {
+    const email = document.getElementById("pwResetEmail").value.trim();
+    const err = document.getElementById("pwResetErr");
+    if(!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)){
+      err.classList.add("show");
+      return;
+    }
+    err.classList.remove("show");
+    const btn = document.getElementById("pwSendBtn");
+    const originalText = btn.innerText;
+    btn.innerText = "Göndərilir...";
+    btn.style.pointerEvents = "none";
+    try {
+      await sendPasswordResetEmail(auth, email);
+      document.getElementById("pwSuccessText").innerText = `${email} ünvanına sıfırlama linki göndərildi. Email qutunuzu (spam qovluğunu da) yoxlayın.`;
+      document.getElementById("pwForm").classList.add("hide");
+      document.getElementById("pwSuccess").classList.add("show");
+    } catch(e) {
+      let msg = "Xəta baş verdi, yenidən cəhd edin.";
+      if(e.code === "auth/user-not-found") msg = "Bu email ilə hesab tapılmadı.";
+      if(e.code === "auth/invalid-email") msg = "Email formatı düzgün deyil.";
+      if(e.code === "auth/too-many-requests") msg = "Çox sayda cəhd edildi, bir az sonra yenidən cəhd edin.";
+      if(window.showToast) window.showToast("❌ " + msg); else alert(msg);
+    } finally {
+      btn.innerText = originalText;
+      btn.style.pointerEvents = "auto";
+    }
+  };
+
+  function isValidEmailModule(v){ return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v); }
+  function isValidAzPhoneModule(v){ return /^\+994\d{9}$/.test((v||'').replace(/\s/g,'')); }
+
+  function listenNotifications() {
+      if(__unsubNotifications) { __unsubNotifications(); __unsubNotifications = null; }
+
+      const NOTIF_LIMIT = 50;
+
+      function handleNotifSnapshot(snapshot){
+          window.notificationsCache = [];
+          let unreadCount = 0;
+          const readIds = JSON.parse(localStorage.getItem("readNotifIds") || "[]");
+          snapshot.forEach((docSnap) => {
+              const data = docSnap.data();
+              const item = { id: docSnap.id, ...data };
+              window.notificationsCache.push(item);
+              if(!readIds.includes(docSnap.id)) unreadCount++;
+          });
+          window.notificationsCache.sort((a, b) => {
+              const ta = (a.createdAt && a.createdAt.toMillis) ? a.createdAt.toMillis() : (a.createdAt || 0);
+              const tb = (b.createdAt && b.createdAt.toMillis) ? b.createdAt.toMillis() : (b.createdAt || 0);
+              return tb - ta;
+          });
+          if(typeof notificationsCache !== "undefined"){
+            notificationsCache.length = 0;
+            notificationsCache.push(...window.notificationsCache);
+          }
+          if(window.renderNotifications) window.renderNotifications();
+          const countEl = document.getElementById("count");
+          if(countEl) countEl.innerText = unreadCount > 0 ? unreadCount : "0";
+
+          snapshot.docChanges().forEach((change) => {
+              if (change.type === "added") {
+                  const data = change.doc.data();
+                  if(window.showToast) window.showToast("🔔 " + (data.title || "Bildiriş") + ": " + (data.body || ""));
+              }
+          });
+      }
+
+      // ƏSAS sorğu: server tərəfdə sıralanır (ən son N bildiriş), ona görə
+      // kolleksiya nə qədər böyüsə də hər sessiyada YALNIZ NOTIF_LIMIT sənəd oxunur.
+      // Bu, "audience" (in) + "createdAt" (orderBy) birləşməsi olduğu üçün composite
+      // index tələb edir - Firebase Console bunu ilk xətada özü təklif edəcək.
+      const qOrdered = query(
+        collection(db, "notifications"),
+        where("audience", "in", ["customer", "all"]),
+        orderBy("createdAt", "desc"),
+        limit(NOTIF_LIMIT)
+      );
+
+      // FALLBACK: index hələ hazır deyilsə (Console-da yaradıldıqdan sonra bir neçə
+      // dəqiqə çəkə bilər), köhnə üsula keçirik - amma YENƏ DƏ limit qoyuruq ki,
+      // kolleksiya böyüdükcə oxuma xərci sərhədsiz artmasın (əvvəllər limit yox idi).
+      const NOTIF_FALLBACK_LIMIT = 200;
+      const qFallback = query(
+        collection(db, "notifications"),
+        where("audience", "in", ["customer", "all"]),
+        limit(NOTIF_FALLBACK_LIMIT)
+      );
+
+      __unsubNotifications = onSnapshot(qOrdered, handleNotifSnapshot, (err) => {
+        console.error("Index-li bildiriş sorğusu uğursuz oldu, fallback-a keçirik:", err);
+        __unsubNotifications = onSnapshot(qFallback, handleNotifSnapshot, (fallbackErr) => {
+          console.error("Bildirişlər yüklənmə xətası:", fallbackErr);
+        });
+      });
+  }
+
+  // Admin panel-də yaradılan promo kodları canlı dinləyir (Kampaniyalar paneli
+  // əvvəllər sabit "BAKUGO20" göstərirdi, indi Firestore-dan real vaxtda yüklənir).
+  let __unsubPromoCodes = null;
+  function listenPromoCodes() {
+      if(__unsubPromoCodes) { __unsubPromoCodes(); __unsubPromoCodes = null; }
+
+      const qPromo = query(collection(db, "promoCodes"), where("active", "==", true));
+
+      __unsubPromoCodes = onSnapshot(qPromo, (snapshot) => {
+          const today = new Date().toISOString().slice(0, 10);
+          window.promoCodesCache = snapshot.docs
+            .map(d => ({ id: d.id, ...d.data() }))
+            .filter(p => !p.expiryDate || p.expiryDate >= today)
+            .filter(p => p.maxUses == null || (p.usedCount || 0) < p.maxUses)
+            .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+
+          if(window.renderPromoCodesList) window.renderPromoCodesList();
+          if(window.updatePromoBadges) window.updatePromoBadges();
+      }, (err) => {
+          console.error("Promo kodlar yüklənmə xətası:", err);
+      });
+  }
+  window.listenPromoCodes = listenPromoCodes;
+
+  window.registerUser = async function() {
+    const name = document.getElementById("regName").value.trim();
+    const surname = document.getElementById("regSurname").value.trim();
+    const phone = document.getElementById("regPhone").value.trim();
+    const email = document.getElementById("regEmail").value.trim();
+    const pass = document.getElementById("regPass").value;
+
+    let ok = true;
+    const phoneErr = document.getElementById("regPhoneErr");
+    const emailErr = document.getElementById("regEmailErr");
+    const passErr = document.getElementById("regPassErr");
+
+    if(!isValidAzPhoneModule(phone)){ phoneErr.classList.add("show"); ok = false; } else phoneErr.classList.remove("show");
+    if(!isValidEmailModule(email)){ emailErr.classList.add("show"); ok = false; } else emailErr.classList.remove("show");
+    if(pass.length < 6){ passErr.classList.add("show"); ok = false; } else passErr.classList.remove("show");
+    if(!name || !surname){ alert("Ad və Soyad boş ola bilməz"); ok = false; }
+
+    if(!ok) return;
+
+    try {
+      const res = await createUserWithEmailAndPassword(auth, email, pass);
+      await setDoc(doc(db, "users", res.user.uid), { name, surname, phone, email, role: "customer", createdAt: new Date() });
+      if(window.showToast) window.showToast("✅ Qeydiyyat tamamlandı");
+    } catch(err) {
+      const msg = typeof mapAuthError === "function" ? mapAuthError(err) : err.message;
+      if(window.showToast) window.showToast("❌ " + msg); else alert(msg);
+    }
+  };
+
+  window.loginUser = async function() {
+    console.log('loginUser çağırıldı');
+    const email = document.getElementById("loginEmail").value;
+    const pass = document.getElementById("loginPass").value;
+    if(!email || !pass){
+      alert("Zəhmət olmasa email və şifrəni daxil edin.");
+      return;
+    }
+    try {
+      console.log('Firebase-ə giriş cəhdi:', email);
+      await signInWithEmailAndPassword(auth, email, pass);
+      console.log('Giriş uğurlu oldu');
+      if(window.showToast) window.showToast("✅ Giriş edildi");
+    } catch(err) {
+      console.error('Giriş xətası:', err.code, err.message);
+      const msg = typeof mapAuthError === "function" ? mapAuthError(err) : err.message;
+      alert("❌ " + msg);
+      if(window.showToast) window.showToast("❌ " + msg);
+    }
+  };
+
+  function mapAuthError(err){
+    const map = {
+      "auth/popup-blocked": "Brauzer popup pəncərəsini bloklayıb. Yenidən cəhd edin və ya popup icazəsi verin.",
+      "auth/popup-closed-by-user": "Giriş pəncərəsi bağlandı.",
+      "auth/cancelled-popup-request": "Giriş ləğv edildi.",
+      "auth/account-exists-with-different-credential": "Bu email artıq başqa üsulla (məs. email/şifrə) qeydiyyatdan keçib.",
+      "auth/operation-not-allowed": "Bu giriş üsulu Firebase Console-da aktiv edilməyib.",
+      "auth/unauthorized-domain": "Bu domen Firebase-də icazəli deyil (Authentication → Settings → Authorized domains). Google/Apple girişi yalnız https:// ilə hostinq edilmiş ünvanda (məs. Firebase Hosting) işləyir, file:// ilə açılan versiyada işləməyəcək.",
+      "auth/operation-not-supported-in-this-environment": "Bu mühitdə (file:// və ya bəzi WebView-lər) Google/Apple girişi dəstəklənmir. Tətbiqi https:// ünvanına (Firebase Hosting və s.) yükləyib oradan sınayın.",
+      "auth/network-request-failed": "İnternet bağlantısında problem var.",
+      "auth/user-disabled": "Bu hesab bloklanıb.",
+      "auth/wrong-password": "Şifrə yanlışdır.",
+      "auth/user-not-found": "Bu email ilə hesab tapılmadı.",
+      "auth/invalid-email": "Email formatı düzgün deyil.",
+      "auth/email-already-in-use": "Bu email artıq istifadə olunur."
+    };
+    return map[err.code] || err.message;
+  }
+
+  async function finishSocialLogin(user){
+    await setDoc(doc(db, "users", user.uid), {
+      name: user.displayName || "",
+      email: user.email || "",
+      role: "customer"
+    }, { merge: true });
+    if(window.showToast) window.showToast("✅ Giriş uğurlu oldu");
+  }
+
+  function setSocialBtnLoading(id, loading, text){
+    const btn = document.getElementById(id);
+    const span = document.getElementById(id + "Text");
+    if(!btn) return;
+    if(loading){
+      btn.classList.add("loading");
+      btn.dataset.originalHtml = span.innerHTML;
+      span.innerHTML = "Yüklənir...";
+    } else {
+      btn.classList.remove("loading");
+      if(btn.dataset.originalHtml) span.innerHTML = btn.dataset.originalHtml;
+      else span.innerText = text;
+    }
+  }
+
+  window.googleLogin = async function() {
+    const provider = new GoogleAuthProvider();
+    setSocialBtnLoading("googleBtn", true);
+    try {
+      const result = await signInWithPopup(auth, provider);
+      await finishSocialLogin(result.user);
+    } catch(err) {
+      if(err.code === "auth/popup-blocked"){
+        try { await signInWithRedirect(auth, provider); return; } catch(e2) {}
+      }
+      if(err.code === "auth/popup-closed-by-user" || err.code === "auth/cancelled-popup-request"){
+        // istifadəçi özü bağladı, əlavə mesaj göstərmirik
+      } else {
+        if(window.showToast) window.showToast("❌ " + mapAuthError(err)); else alert(mapAuthError(err));
+      }
+    } finally {
+      setSocialBtnLoading("googleBtn", false, "Google ilə davam et");
+    }
+  };
+
+  window.appleLogin = async function() {
+    const provider = new OAuthProvider('apple.com');
+    provider.addScope('email');
+    provider.addScope('name');
+    setSocialBtnLoading("appleBtn", true);
+    try {
+      const result = await signInWithPopup(auth, provider);
+      await finishSocialLogin(result.user);
+    } catch(err) {
+      if(err.code === "auth/popup-blocked" || err.code === "auth/popup-closed-by-user"){
+        try { await signInWithRedirect(auth, provider); return; } catch(e2) {}
+      }
+      if(err.code === "auth/operation-not-allowed"){
+        if(window.showToast) window.showToast("❌ Apple ilə giriş hələ aktiv edilməyib (Firebase Console → Authentication → Sign-in method → Apple)");
+        else alert("Apple ilə giriş hələ aktiv edilməyib.");
+      } else {
+        if(window.showToast) window.showToast("❌ " + mapAuthError(err)); else alert(mapAuthError(err));
+      }
+    } finally {
+      setSocialBtnLoading("appleBtn", false, "Apple ilə davam et");
+    }
+  };
+
+  getRedirectResult(auth).then(async (result) => {
+    if(result && result.user){ await finishSocialLogin(result.user); }
+  }).catch((err) => {
+    if(err && err.code) console.warn("Redirect login error:", mapAuthError(err));
+  });
+
+  window.logout = async function() {
+    await signOut(auth);
+    location.reload();
+  };
+
+  window.openDeleteAccount = function() {
+    if(!window.currentUser){ if(window.showToast) window.showToast("❌ Əvvəlcə daxil olun"); return; }
+    const user = window.currentUser;
+    const providerId = (user.providerData && user.providerData[0]) ? user.providerData[0].providerId : "password";
+    const pwInput = document.getElementById("deleteAccountPassword");
+    if(pwInput){
+      pwInput.style.display = (providerId === "password") ? "block" : "none";
+      pwInput.value = "";
+    }
+    const err = document.getElementById("deleteAccountErr");
+    if(err) err.classList.remove("show");
+    document.getElementById("deleteAccountModal").classList.add("active");
+  };
+
+  window.closeDeleteAccount = function() {
+    document.getElementById("deleteAccountModal").classList.remove("active");
+  };
+
+  window.confirmDeleteAccount = async function() {
+    const user = window.currentUser;
+    if(!user) return;
+    const err = document.getElementById("deleteAccountErr");
+    const btn = document.getElementById("deleteAccountBtn");
+    if(err) err.classList.remove("show");
+    if(btn) btn.innerText = "⏳ Silinir...";
+
+    try {
+      const providerId = (user.providerData && user.providerData[0]) ? user.providerData[0].providerId : "password";
+
+      // Firebase təhlükəsizlik tələbi: həssas əməliyyatdan (hesab silmə) əvvəl yenidən doğrulama
+      if(providerId === "password"){
+        const pw = document.getElementById("deleteAccountPassword").value;
+        if(!pw){
+          if(err){ err.innerText = "Zəhmət olmasa şifrənizi daxil edin"; err.classList.add("show"); }
+          if(btn) btn.innerText = "🗑️ Bəli, hesabımı sil";
+          return;
+        }
+        const cred = EmailAuthProvider.credential(user.email, pw);
+        await reauthenticateWithCredential(user, cred);
+      } else if(providerId === "google.com"){
+        await reauthenticateWithPopup(user, new GoogleAuthProvider());
+      } else if(providerId === "apple.com"){
+        await reauthenticateWithPopup(user, new OAuthProvider("apple.com"));
+      }
+
+      const uid = user.uid;
+
+      // İstifadəçiyə aid şəxsi məlumatları Firestore-dan sil
+      await Promise.allSettled([
+        deleteDoc(doc(db, "users", uid)),
+        deleteDoc(doc(db, "carts", uid)),
+        deleteDoc(doc(db, "favorites", uid))
+      ]);
+
+      // Auth hesabını sil
+      await deleteUser(user);
+
+      window.currentUser = null;
+      if(document.getElementById("deleteAccountModal")) document.getElementById("deleteAccountModal").classList.remove("active");
+      alert("✅ Hesabınız və şəxsi məlumatlarınız uğurla silindi.");
+      location.reload();
+
+    } catch(e) {
+      console.error("Hesab silmə xətası:", e);
+      if(err){
+        if(e.code === "auth/wrong-password" || e.code === "auth/invalid-credential"){
+          err.innerText = "Şifrə yanlışdır, yenidən cəhd edin";
+        } else if(e.code === "auth/requires-recent-login"){
+          err.innerText = "Təhlükəsizlik üçün yenidən daxil olub cəhd edin";
+        } else {
+          err.innerText = "Xəta: " + e.message;
+        }
+        err.classList.add("show");
+      }
+    } finally {
+      if(btn) btn.innerText = "🗑️ Bəli, hesabımı sil";
+    }
+  };
+
+  window.syncUserProfile = async function() {
+    if(!window.currentUser) return;
+    await setDoc(doc(db, "users", window.currentUser.uid), {
+      name: document.getElementById("name").value,
+      surname: document.getElementById("surnameInput").value,
+      phone: document.getElementById("phoneInput").value,
+      email: document.getElementById("mailInput").value
+    }, { merge: true });
+  };
+
+  window.syncCartToFirebase = async function() {
+    if(!window.currentUser) return;
+    await setDoc(doc(db, "carts", window.currentUser.uid), { items: cartArr });
+  };
+
+  // Şəkli Canvas ilə maksimum ölçüyə qədər kiçildir və JPEG kimi sıxaraq yeni
+  // base64 data-URL qaytarır. Telefon kamerası 3-8MB şəkil verə bilər - bunu
+  // birbaşa Firestore-a yazmaq sənəd ölçüsünü və hər oxumanın xərcini şişirdir.
+  // Profil şəkli üçün 300px kifayətdir (dairəvi avatar, böyük göstərilmir).
+  function resizeImageToDataURL(file, maxDimension, quality){
+    return new Promise((resolve, reject) => {
+      const img = new Image();
+      const reader = new FileReader();
+      reader.onload = () => { img.src = reader.result; };
+      reader.onerror = reject;
+      img.onload = () => {
+        let { width, height } = img;
+        if(width > height){
+          if(width > maxDimension){ height = Math.round(height * (maxDimension / width)); width = maxDimension; }
+        } else {
+          if(height > maxDimension){ width = Math.round(width * (maxDimension / height)); height = maxDimension; }
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+        ctx.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  window.uploadPhoto = async function(e) {
+    const file = e.target.files[0];
+    if(!file) return;
+    try {
+      const resizedDataUrl = await resizeImageToDataURL(file, 300, 0.75);
+      document.getElementById("profilePic").src = resizedDataUrl;
+      if(window.currentUser) {
+        await setDoc(doc(db, "users", window.currentUser.uid), { profilePhoto: resizedDataUrl }, { merge: true });
+      }
+    } catch(err){
+      console.error("Şəkil emalı xətası:", err);
+      if(window.showToast) window.showToast("❌ Şəkil yüklənmədi, yenidən cəhd edin");
+    }
+  };
+
+  // Bir restoran dəyişikliyini (add/modify/remove) paylaşılan map-lərə yazan köməkçi -
+  // həm geohash-əsaslı, həm də fallback listener eyni məntiqi istifadə edir.
+  function applyRestaurantDocChange(change){
+    const id = change.doc.id;
+    if(change.type === "removed"){
+      delete restaurantPhotos[id];
+      delete restaurantCoords[id];
+      __allRestaurantIds.delete(id);
+      return;
+    }
+    __allRestaurantIds.add(id);
+    const d = change.doc.data();
+    restaurantPhotos[id] = d.photoURL || "";
+    const rLat = parseFloat(d.restaurantLat);
+    const rLng = parseFloat(d.restaurantLng);
+    if(!isNaN(rLat) && !isNaN(rLng)){
+      restaurantCoords[id] = { lat: rLat, lng: rLng };
+    } else {
+      delete restaurantCoords[id];
+    }
+  }
+
+  function unsubscribeAllRestaurantListeners(){
+    __restaurantGeohashUnsubs.forEach((u) => { if(u) u(); });
+    __restaurantGeohashUnsubs = [];
+  }
+
+  // TƏHLÜKƏSİZLİK ŞƏBƏKƏSİ: geohash sahəsi hələ backfill edilməyibsə (yəni heç bir
+  // restoran sənədində "geohash" yoxdursa), geohash sorğuları HEÇ NƏ qaytarmayacaq və
+  // tətbiq "restoran yoxdur" görünəcək. Bunun qarşısını almaq üçün, ilk sorğulardan
+  // sonra 4 saniyə ərzində HEÇ bir restoran gəlməyibsə, avtomatik olaraq köhnə
+  // "hamısını çək" üsuluna keçirik ki, müştəri heç vaxt boş ekran görməsin.
+  function activateRestaurantsFallbackAll(){
+    if(__restaurantsFallbackActive) return;
+    __restaurantsFallbackActive = true;
+    unsubscribeAllRestaurantListeners();
+    console.warn("⚠️ Heç bir restoranda 'geohash' sahəsi tapılmadı - köhnə 'hamısını çək' üsuluna keçirik. " +
+      "Performansı bərpa etmək üçün admin hesabından bir dəfə: await backfillRestaurantGeohashes()");
+    const RESTAURANTS_SAFETY_LIMIT = 600;
+    const unsub = onSnapshot(query(collection(db, "restaurants"), limit(RESTAURANTS_SAFETY_LIMIT)), (snapshot) => {
+      const changes = snapshot.docChanges();
+      if(changes.length === 0) return;
+      changes.forEach(applyRestaurantDocChange);
+      __restaurantsLoaded = true;
+      recomputeNearbyProducts();
+      debouncedRender();
+    });
+    __restaurantGeohashUnsubs.push(unsub);
+  }
+
+  function listenFirestoreRestaurants() {
+    if(__restaurantsFallbackActive) return; // artıq fallback rejimindəyik, geohash-ə keçməyə çalışma
+
+    // Mərkəz: müştərinin bilinən koordinatı, yoxdursa Bakı hub-ı.
+    const uLat = parseFloat(localStorage.getItem("userLat"));
+    const uLng = parseFloat(localStorage.getItem("userLng"));
+    const hasCoords = !isNaN(uLat) && !isNaN(uLng);
+    const centerLat = hasCoords ? uLat : BAKUGO_HUB_LAT;
+    const centerLng = hasCoords ? uLng : BAKUGO_HUB_LNG;
+
+    // Əgər mərkəz əvvəlki sorğu mərkəzindən çox uzaqlaşmayıbsa (məs. istifadəçi
+    // xəritədə pini bir neçə metr sürüşdürüb), listener-ləri təzədən qurmuruq -
+    // hər kiçik hərəkətdə Firestore-a yeni sorğu açmaq lazımsız yükdür.
+    const REQUERY_THRESHOLD_KM = 3;
+    if(__lastRestaurantQueryCenter && __restaurantGeohashUnsubs.length > 0){
+      const moved = haversineDistanceKm(centerLat, centerLng, __lastRestaurantQueryCenter.lat, __lastRestaurantQueryCenter.lng);
+      if(moved < REQUERY_THRESHOLD_KM) return;
+    }
+    __lastRestaurantQueryCenter = { lat: centerLat, lng: centerLng };
+
+    unsubscribeAllRestaurantListeners();
+
+    const prefixes = geohashPrefixesForRadius(centerLat, centerLng, MAX_DELIVERY_RADIUS_KM);
+
+    let firedCount = 0;
+    prefixes.forEach((prefix) => {
+      const q = query(
+        collection(db, "restaurants"),
+        where("geohash", ">=", prefix),
+        where("geohash", "<", prefix + "\uf8ff")
+      );
+      const unsub = onSnapshot(q, (snapshot) => {
+        firedCount++;
+        const changes = snapshot.docChanges();
+        if(changes.length > 0){
+          changes.forEach(applyRestaurantDocChange);
+          __restaurantsLoaded = true;
+          recomputeNearbyProducts();
+          debouncedRender();
+        }
+      }, (err) => {
+      });
+      __restaurantGeohashUnsubs.push(unsub);
+    });
+
+    // 4 saniyə sonra hələ də heç bir restoran tapılmayıbsa (böyük ehtimalla geohash
+    // sahəsi backfill edilməyib), köhnə üsula keçir.
+    setTimeout(() => {
+      if(!__restaurantsFallbackActive && __allRestaurantIds.size === 0){
+        activateRestaurantsFallbackAll();
+      }
+    }, 4000);
+  }
+  window.listenFirestoreRestaurants = listenFirestoreRestaurants;
+
+  // Müştərinin (və ya, məkanı bilinmirsə, Bakı mərkəzinin) MAX_DELIVERY_RADIUS_KM
+  // radiusunda olan restoranların ID-lərini qaytarır. Koordinatı bilinməyən restoranlar
+  // (məs. hələ xəritədə pin təyin etməyib) əvvəlki davranışa uyğun olaraq YENƏ DAXİL
+  // edilir - "koordinat yoxdur" səbəbi ilə heç kim gizlədilmir, yalnız "koordinat
+  // MƏLUMDUR amma uzaqdır" olanlar süzülür.
+  function getNearbyRestaurantIds(){
+    const uLat = parseFloat(localStorage.getItem("userLat"));
+    const uLng = parseFloat(localStorage.getItem("userLng"));
+    const hasCoords = !isNaN(uLat) && !isNaN(uLng);
+    const centerLat = hasCoords ? uLat : BAKUGO_HUB_LAT;
+    const centerLng = hasCoords ? uLng : BAKUGO_HUB_LNG;
+    const ids = [];
+    __allRestaurantIds.forEach((rid) => {
+      const c = restaurantCoords[rid];
+      if(!c){ ids.push(rid); return; }
+      const d = haversineDistanceKm(c.lat, c.lng, centerLat, centerLng);
+      if(d <= MAX_DELIVERY_RADIUS_KM) ids.push(rid);
+    });
+    return ids;
+  }
+  window.getNearbyRestaurantIds = getNearbyRestaurantIds;
+
+  // Yaxın restoran ID-si dəyişəndə (restoran siyahısı yeniləndi, YA DA müştəri
+  // məkanını dəyişdi) məhsul dinləyicilərini bu yeni siyahıya uyğun yenidən qurur.
+  // Eyni siyahı olduqda TƏKRAR sorğu açmır (key müqayisəsi ilə) - lazımsız Firestore
+  // oxumasının qarşısını alır.
+  function recomputeNearbyProducts(){
+    if(!__restaurantsLoaded) return;
+    const nearbyIds = getNearbyRestaurantIds();
+    const key = nearbyIds.slice().sort().join(",");
+    if(key === __lastNearbyIdsKey) return;
+    __lastNearbyIdsKey = key;
+    startProductsListenersForIds(nearbyIds);
+  }
+  window.recomputeNearbyProducts = recomputeNearbyProducts;
+
+  // Verilən restoran ID-ləri üçün "products" kolleksiyasını sorğulayır. Firestore-un
+  // "in" operatoru bir sorğuda maksimum 30 dəyər qəbul etdiyi üçün ID-lər 30-luq
+  // qruplara bölünür, hər qrup öz onSnapshot dinləyicisinə malikdir. Bu, 25,000+
+  // məhsulu YÜKLƏMƏK əvəzinə YALNIZ yaxın restoranların (adətən 10-50 restoran,
+  // yəni bir neçə yüz məhsul) datasını gətirir - Wolt-un işlədiyi model də budur.
+  function startProductsListenersForIds(ids){
+    __unsubProductsChunks.forEach((u) => { if(u) u(); });
+    __unsubProductsChunks = [];
+    __productsById.clear();
+    if(ids.length === 0){
+      foods = [...staticFoods];
+      debouncedRender();
+      return;
+    }
+    const CHUNK = 30;
+    for(let i = 0; i < ids.length; i += CHUNK){
+      const chunk = ids.slice(i, i + CHUNK);
+      const unsub = onSnapshot(query(collection(db, "products"), where("restaurantId", "in", chunk)), (snapshot) => {
+        const changes = snapshot.docChanges();
+        if(changes.length === 0) return;
+        changes.forEach((change) => {
+          const id = change.doc.id;
+          if(change.type === "removed"){
+            __productsById.delete(id);
+            return;
+          }
+          const p = change.doc.data();
+          __productsById.set(id, {
+            name: p.name || "Adsız məhsul",
+            price: parseFloat(p.price) || 0,
+            discountPercent: parseFloat(p.discountPercent) || 0,
+            unit: p.unit || "ədəd",
+            rating: p.rating || 5.0,
+            category: p.category || "Restoranlar",
+            chain: p.chain || "Bakugo",
+            chainLogo: p.chainLogo || "",
+            restaurantName: p.restaurantName || p.chain || "Bakugo",
+            restaurantAddress: p.restaurantAddress || "Restoran ünvanı qeyd olunmayıb",
+            restaurantPhone: p.restaurantPhone || "+994702484852",
+            restaurantId: p.restaurantId || "unknown",
+            img: p.img || "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?w=600"
+          });
+        });
+        foods = [...staticFoods, ...Array.from(__productsById.values())];
+        debouncedRender();
+      }, (err) => {
+      });
+      __unsubProductsChunks.push(unsub);
+    }
+  }
+
+  // KÖHNƏ FUNKSİYA (ARTIQ İSTİFADƏ OLUNMUR): əvvəllər bura BÜTÜN "products" kolleksiyasını
+  // limit(9999) ilə (əvvəl 30000 - bu, Firestore-un 10000 tavanını keçdiyi üçün sorğunu
+  // "invalid-argument" xətası ilə tamamilə sıradan çıxarırdı, yəni HEÇ BİR məhsul heç vaxt
+  // yüklənmirdi) sorğulayan kod var idi. İndi məhsullar startProductsListenersForIds()
+  // vasitəsilə YALNIZ müştəriyə yaxın restoranlar üçün yüklənir (bax: recomputeNearbyProducts,
+  // çağırılır: restoran siyahısı yükləndikdə və/və ya müştərinin məkanı dəyişdikdə).
+  // Bu funksiya login zamanı geriyə uyğunluq üçün çağırılır, amma artıq heç nə etmir.
+  function listenFirestoreProducts() {
+  }
+  window.listenFirestoreProducts = listenFirestoreProducts;
+
+  window.orderNow = async function() {
+    if(cartArr.length === 0) return;
+    if(!window.addressNote || window.addressNote.trim().length === 0){
+      const err = document.getElementById("addressNoteErr");
+      if(err) err.classList.add("show");
+      const editBox = document.getElementById("addressNoteEdit");
+      if(editBox) editBox.style.display = "block";
+      const viewBox = document.getElementById("addressNoteView");
+      if(viewBox) viewBox.style.display = "none";
+      const input = document.getElementById("addressNoteInput");
+      if(input) input.focus();
+      if(window.showToast) window.showToast("❌ Zəhmət olmasa Ev/Mənzil/Blok nömrəsini qeyd edin");
+      else alert("Zəhmət olmasa Ev/Mənzil/Blok nömrəsini qeyd edin");
+      return;
+    }
+    document.getElementById("loader").style.display = "flex";
+    
+    const totals = window.calculateTotal ? window.calculateTotal() : null;
+    let totalAmount = 0;
+    cartArr.forEach(i => totalAmount += i.price);
+    totalAmount = Math.max(0, applyDiscountToAmount(totalAmount));
+    const deliveryFee = (totalAmount < MIN_ORDER_THRESHOLD) ? DELIVERY_FEE_LOW : DELIVERY_FEE_HIGH;
+    totalAmount += deliveryFee;
+
+    try {
+      const firstItem = cartArr[0];
+      const user = window.currentUser;
+      const restaurantId = firstItem.restaurantId;
+
+      let resLat = "40.4093";
+      let resLng = "49.8671";
+
+      if (restaurantId && restaurantId !== "unknown") {
+          const restaurantSnap = await getDoc(doc(db, "restaurants", restaurantId));
+          if (restaurantSnap.exists()) {
+              const resData = restaurantSnap.data();
+              resLat = resData.restaurantLat || "40.4093";
+              resLng = resData.restaurantLng || "49.8671";
+          }
+      }
+      
+      const orderData = {
+        userId: user.uid,
+        customerId: user.uid,
+        customerName: document.getElementById("name").value || "Adsız",
+        customerSurname: document.getElementById("surnameInput").value || "",
+        customerPhone: document.getElementById("phoneInput").value || "Qeyd olunmayıb",
+        customerAddress: document.getElementById("location").value || "Ünvan qeyd olunmayıb",
+        customerLat: parseFloat(localStorage.getItem("userLat")) || 40.4093,
+        customerLng: parseFloat(localStorage.getItem("userLng")) || 49.8671,
+        
+        restaurantId: restaurantId || "unknown",
+        restaurantName: firstItem.restaurantName || firstItem.chain || "Bakugo",
+        restaurantPhone: firstItem.restaurantPhone || "+994702484852",
+        restaurantAddress: firstItem.restaurantAddress || "Bakı",
+        restaurantLat: resLat,
+        restaurantLng: resLng,
+        
+        items: cartArr.map(item => ({
+            name: item.name,
+            price: item.price,
+            unit: item.unit
+        })),
+        
+        deliveryFee: deliveryFee,
+        note: window.addressNote || "Qeyd yoxdur",
+        totalAmount: totalAmount,
+        paymentMethod: window.selectedPaymentMethod || "cash",
+        paymentMethodLabel: paymentMethodLabel(window.selectedPaymentMethod || "cash"),
+        couponCode: activeCoupon ? activeCoupon.code : null,
+        status: "preparing",
+        progress: 20,
+        createdAt: new Date()
+      };
+
+      const orderRef = await addDoc(collection(db, "orders"), orderData);
+
+      if(activeCoupon){
+        const usedPromo = (window.promoCodesCache || []).find(p => p.code === activeCoupon.code);
+        if(usedPromo){
+          try {
+            await updateDoc(doc(db, "promoCodes", usedPromo.id), { usedCount: (usedPromo.usedCount || 0) + 1 });
+          } catch(e) { console.error("Promo istifadə sayı yenilənmədi:", e); }
+        }
+        activeCoupon = null;
+        const couponInput = document.getElementById("couponInput");
+        if(couponInput) couponInput.value = "";
+      }
+
+      cartArr = [];
+      await setDoc(doc(db, "carts", user.uid), { items: [] });
+      renderCartItems();
+      
+      document.getElementById("loader").style.display = "none";
+      toggleCart();
+      toggleTracking();
+      if(window.showToast) window.showToast("✅ Sifariş uğurla göndərildi!");
+
+      listenToActiveOrder(orderRef.id);
+
+    } catch(e) {
+      document.getElementById("loader").style.display = "none";
+      alert("Sifariş xətası: " + e.message);
+    }
+  };
+
+  // handleSnapshot və handleFallbackSnapshot arasında paylaşılan render məntiqi
+  // (aktiv sifariş aşkarlama + siyahının DOM-a yazılması).
+  function renderOrderHistoryList(orders, historyList){
+    if(!historyList) return;
+
+    // İzləmə (tracking) panelinin boş qalmaması üçün: istifadəçinin AKTIV (hələ bitməmiş)
+    // sifarişi varsa, avtomatik olaraq onu izləməyə başlayırıq - bunun üçün əvvəlcə
+    // sifarişi tam əl ilə açmağa (orderNow) ehtiyac yoxdur, məs. səhifə yenidən yüklənəndə də işləyir.
+    const ACTIVE_ORDER_STATUSES = ["preparing", "searching_courier", "courier_accepted", "collected"];
+    const activeOrder = orders.find(o => ACTIVE_ORDER_STATUSES.includes(o.status));
+    if(activeOrder){
+      if(typeof window.getActiveOrderId === "function" && window.getActiveOrderId() !== activeOrder.id
+         && typeof window.listenToActiveOrder === "function"){
+        window.listenToActiveOrder(activeOrder.id);
+      }
+    } else {
+      if(typeof window.clearActiveOrderTracking === "function") window.clearActiveOrderTracking();
+    }
+
+    historyList.innerHTML = "";
+    let historyHtml = "";
+    orders.forEach((order) => {
+      const date = order.createdAt && order.createdAt.seconds
+        ? new Date(order.createdAt.seconds * 1000).toLocaleDateString()
+        : "-";
+
+      let displayStatus = order.status;
+      if(order.status === "preparing") displayStatus = "🍔 Hazırlanır";
+      if(order.status === "searching_courier") displayStatus = "🔍 Kuryer Axtarılır";
+      if(order.status === "courier_accepted") displayStatus = "✅ Kuryer Qəbul Etdi";
+      if(order.status === "collected") displayStatus = "🛍️ Yoldadır";
+      if(order.status === "delivered") displayStatus = "🏁 Çatdırıldı";
+      if(order.status === "cancelled") displayStatus = "❌ Ləğv edildi";
+
+      const canCancel = (order.status === "preparing" || order.status === "searching_courier");
+      const totalDisplay = (typeof order.totalAmount === "number") ? order.totalAmount.toFixed(2) : (parseFloat(order.totalAmount) || 0).toFixed(2);
+
+      historyHtml += `
+        <div class="notif-top">
+          <div style="display:flex; justify-content:space-between;">
+            <strong>Sifariş: #${order.id.substring(0,6)}</strong>
+            <span style="color:var(--orange)">${displayStatus}</span>
+          </div>
+          <div style="font-size:12px; margin-top:5px; opacity:0.7;">Tarix: ${date}</div>
+          <div style="font-size:14px; margin-top:5px; font-weight:bold;">Məbləğ: ${totalDisplay} AZN</div>
+          ${canCancel ? `<div class="btn danger" style="margin-top:8px;background:rgba(255,60,60,0.15);border-color:#ff4d4d;color:#ff8a8a;font-size:12px;padding:8px;" onclick="cancelOrderFromHistory('${order.id}')">❌ Ləğv et</div>` : ""}
+        </div>
+      `;
+    });
+    historyList.innerHTML = historyHtml;
+  }
+
+  function listenToOrderHistory(userId) {
+    const historyList = document.getElementById("historyList");
+
+    // Əvvəlki dinləyici aktivdirsə saxla - login/logout təkrarında iki paralel
+    // listener yaranmasın deyə.
+    if(__unsubOrderHistory) { __unsubOrderHistory(); __unsubOrderHistory = null; }
+
+    // İNDİ composite index (userId ASC + createdAt DESC) Firestore-da yaradılıb,
+    // ona görə sıralamanı server tərəfdə (orderBy) edirik - bu, bütün sənədləri
+    // çəkib client-də sort etməkdənsə daha sürətli və az oxuma xərcli həlldir.
+    // limit(50): Wolt-da da olduğu kimi tam tarixçə deyil, ən son 50 sifariş
+    // göstərilir - istifadəçinin illər boyu bütün sifarişlərini hər dəfə real-time
+    // çəkmək həm lazımsız, həm də oxuma xərcini artırır.
+    const ORDER_HISTORY_LIMIT = 50;
+    const qOrdered = query(
+      collection(db, "orders"),
+      where("userId", "==", userId),
+      orderBy("createdAt", "desc"),
+      limit(ORDER_HISTORY_LIMIT)
+    );
+
+    const handleSnapshot = (querySnapshot) => {
+      if(!historyList) return;
+
+      if(querySnapshot.empty){
+        historyList.innerHTML = `<div style="text-align:center;padding:30px;opacity:.6;">🕓 Hələ sifarişiniz yoxdur</div>`;
+        return;
+      }
+
+      let orders = [];
+      querySnapshot.forEach((docSnap) => {
+        orders.push({ id: docSnap.id, ...docSnap.data() });
+      });
+      // orderBy("createdAt","desc") artıq server tərəfdə sıralayıb, əlavə client sort lazım deyil.
+      renderOrderHistoryList(orders, historyList);
+    };
+
+    // Fallback: composite index hələ tam qurulmayıbsa (Firebase Console-da index
+    // yaradıldıqdan sonra bir neçə dəqiqə çəkə bilər) və ya hər hansı səbəbdən
+    // orderBy-lı sorğu "failed-precondition" xətası versə, köhnə üsula (yalnız where,
+    // sıralama client tərəfdə) keçirik ki, tətbiq sınmasın.
+    const qFallback = query(collection(db, "orders"), where("userId", "==", userId), limit(200));
+    const handleFallbackSnapshot = (querySnapshot) => {
+      if(!historyList) return;
+      if(querySnapshot.empty){
+        historyList.innerHTML = `<div style="text-align:center;padding:30px;opacity:.6;">🕓 Hələ sifarişiniz yoxdur</div>`;
+        return;
+      }
+      let orders = [];
+      querySnapshot.forEach((docSnap) => orders.push({ id: docSnap.id, ...docSnap.data() }));
+      orders.sort((a, b) => {
+        const tA = a.createdAt && a.createdAt.seconds ? a.createdAt.seconds : 0;
+        const tB = b.createdAt && b.createdAt.seconds ? b.createdAt.seconds : 0;
+        return tB - tA;
+      });
+      renderOrderHistoryList(orders, historyList);
+    };
+
+    __unsubOrderHistory = onSnapshot(qOrdered, handleSnapshot, (err) => {
+      console.error("Index-li sifariş sorğusu uğursuz oldu, fallback-a keçirik:", err);
+      if(err && err.code === "failed-precondition"){
+        // Index hələ hazır deyil - client-side sort ilə davam et
+        __unsubOrderHistory = onSnapshot(qFallback, handleFallbackSnapshot, (fallbackErr) => {
+          console.error("Sifariş tarixçəsi yüklənmə xətası:", fallbackErr);
+          if(historyList){
+            historyList.innerHTML = `<div style="text-align:center;padding:20px;color:#ff8a8a;font-size:13px;">❌ Sifarişlər yüklənmədi: ${fallbackErr.message}</div>`;
+          }
+          if(window.showToast) window.showToast("❌ Sifariş tarixçəsi yüklənmədi");
+        });
+      } else {
+        if(historyList){
+          historyList.innerHTML = `<div style="text-align:center;padding:20px;color:#ff8a8a;font-size:13px;">❌ Sifarişlər yüklənmədi: ${err.message}</div>`;
+        }
+        if(window.showToast) window.showToast("❌ Sifariş tarixçəsi yüklənmədi");
+      }
+    });
+  }
+
+  window.cancelOrderFromHistory = async function(orderId){
+    if(!confirm("Sifarişi ləğv etmək istədiyinizə əminsiniz?")) return;
+    try {
+      await updateDoc(doc(db, "orders", orderId), { status: "cancelled", progress: 0 });
+      if(window.showToast) window.showToast("❌ Sifariş ləğv edildi");
+    } catch(e){ if(window.showToast) window.showToast("❌ Xəta baş verdi"); }
+  };
+
+    onAuthStateChanged(auth, async (user) => {
+    if (user) {
+      const userDoc = await getDoc(doc(db, "users", user.uid));
+      
+      if (userDoc.exists()) {
+        const data = userDoc.data();
+        if (data.role !== "customer") {
+          await signOut(auth);
+          alert("Siz bu tətbiqə daxil ola bilməzsiniz.");
+          location.reload();
+          return;
+        }
+
+        window.currentUser = user;
+        document.getElementById("auth").style.display = "none";
+        
+        listenFirestoreProducts();
+        listenFirestoreRestaurants();
+        listenNotifications();
+        listenPromoCodes();
+
+        document.getElementById("name").value = data.name || "";
+        document.getElementById("surnameInput").value = data.surname || "";
+        document.getElementById("phoneInput").value = data.phone || "";
+        document.getElementById("mailInput").value = data.email || "";
+        if(data.profilePhoto) document.getElementById("profilePic").src = data.profilePhoto;
+        if(data.address) {
+            document.getElementById("location").value = data.address;
+            localStorage.setItem("userLocation", data.address);
+        }
+        if(data.customerLat) localStorage.setItem("userLat", data.customerLat);
+        if(data.customerLng) localStorage.setItem("userLng", data.customerLng);
+        if(typeof updateDeliveryStripText === "function") updateDeliveryStripText();
+        // QEYD: listenFirestoreRestaurants() yuxarıda (login-in başında) artıq bir
+        // dəfə çağırılıb, amma o zaman istifadəçinin yadda saxlanmış ünvanı (yuxarı
+        // sətirlərdə) hələ localStorage-a yazılmamışdı, ona görə Bakı hub-ı mərkəz
+        // kimi istifadə edib. İndi əsl ünvan bilindiyi üçün YENİDƏN çağırırıq ki,
+        // sorğu düzgün mərkəzə köçsün (REQUERY_THRESHOLD_KM-dən uzaqdırsa).
+        if(window.listenFirestoreRestaurants) window.listenFirestoreRestaurants();
+        if(window.recomputeNearbyProducts) window.recomputeNearbyProducts();
+
+        const cartDoc = await getDoc(doc(db, "carts", user.uid));
+        if (cartDoc.exists()) {
+          cartArr = cartDoc.data().items || [];
+          renderCartItems();
+        }
+
+        const favDoc = await getDoc(doc(db, "favorites", user.uid));
+        if (favDoc.exists()) {
+          const remoteFavs = favDoc.data().items || [];
+          if(remoteFavs.length > favorites.length) {
+            favorites = remoteFavs;
+            localStorage.setItem("favorites", JSON.stringify(favorites));
+          }
+          renderFavorites();
+        }
+
+        listenToOrderHistory(user.uid);
+      }
+    } else {
+      window.currentUser = null;
+      document.getElementById("auth").style.display = "flex";
+    }
+  });
+</script>
+</body>
+</html>
