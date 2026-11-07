@@ -1,45 +1,76 @@
 {
+  "id": "./kuryer.html",
   "name": "BakuGo Kuryer",
-  "short_name": "BakuGo Kuryer",
-  "description": "BakuGo Kuryer — sifarişləri qəbul et, marşrutu izlə, çatdırılmanı idarə et.",
-  "start_url": "./index.html",
-  "scope": "./",
-  "display": "standalone",
-  "orientation": "portrait",
-  "background_color": "#0d0d0d",
-  "theme_color": "#d4af37",
+  "short_name": "BG Kuryer",
+  "description": "BakuGo kuryerləri üçün: yeni sifarişlər, marşrut, qazanc və canlı naviqasiya.",
   "lang": "az",
   "dir": "ltr",
+  "start_url": "./kuryer.html",
+  "scope": "./kuryer.html",
+  "display": "standalone",
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
+  "orientation": "portrait",
+  "background_color": "#000000",
+  "theme_color": "#0d0d0d",
+  "categories": [
+    "business",
+    "productivity",
+    "navigation"
+  ],
   "icons": [
     {
-      "src": "icon-192.png",
+      "src": "icons/kuryer-96.png",
+      "sizes": "96x96",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "icons/kuryer-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icon-384.png",
-      "sizes": "384x384",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icon-512.png",
+      "src": "icons/kuryer-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "icon-512-maskable.png",
-      "sizes": "512x512",
+      "src": "icons/kuryer-maskable-192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "maskable"
     },
     {
-      "src": "icon-1024.png",
-      "sizes": "1024x1024",
+      "src": "icons/kuryer-maskable-512.png",
+      "sizes": "512x512",
       "type": "image/png",
-      "purpose": "any"
+      "purpose": "maskable"
+    }
+  ],
+  "prefer_related_applications": false,
+  "launch_handler": {
+    "client_mode": "focus-existing"
+  },
+  "handle_links": "preferred",
+  "screenshots": [
+    {
+      "src": "screenshots/kuryer-narrow.png",
+      "sizes": "1080x1920",
+      "type": "image/png",
+      "form_factor": "narrow",
+      "label": "BakuGo Kuryer — telefon"
+    },
+    {
+      "src": "screenshots/kuryer-wide.png",
+      "sizes": "1920x1080",
+      "type": "image/png",
+      "form_factor": "wide",
+      "label": "BakuGo Kuryer — kompüter"
     }
   ]
 }
