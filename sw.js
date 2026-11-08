@@ -3,15 +3,15 @@
    2) Firebase Cloud Messaging — tətbiq bağlı olanda push bildirişləri
    Bu fayl index.html ilə EYNİ qovluqda olmalıdır. */
 
-const CACHE = 'bakugo-kuryer-v1';
+const CACHE = 'bakugo-kuryer-v2';
 const PRECACHE = [
   './',
   './index.html',
   './offline.html',
   './manifest.json',
-  './icons/icon-192.png',
-  './icons/icon-512.png',
-  './icons/maskable-512.png'
+  './icon-192.png',
+  './icon-512.png',
+  './maskable-512.png'
 ];
 
 self.addEventListener('install', (event) => {
@@ -91,8 +91,8 @@ try {
     const d = (payload && payload.data) || {};
     self.registration.showNotification(d.title || '🔔 Yeni sifariş!', {
       body: d.body || 'Yeni sifariş gəldi. Qəbul etmək üçün toxunun.',
-      icon: './icons/icon-192.png',
-      badge: './icons/icon-96.png',
+      icon: './icon-192.png',
+      badge: './icon-96.png',
       tag: d.orderId || 'bakugo-order',
       renotify: true,
       requireInteraction: true,
