@@ -2063,7 +2063,8 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
     measurementId: "G-44T95W0PSX"
   };
 
-  const app = initializeApp(firebaseConfig);
+  /* Ayrı ad: eyni telefonda müştəri və kuryer tətbiqi bir-birinin girişini pozmasın */
+  const app = initializeApp(firebaseConfig, "bakugo-kuryer");
   const db = getFirestore(app);
   const auth = getAuth(app);
   
