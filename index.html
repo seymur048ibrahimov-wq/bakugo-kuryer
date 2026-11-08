@@ -11,10 +11,10 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="BakuGo Kuryer">
 <meta name="apple-mobile-web-app-status-bar-style" content="black">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
-<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icon-512.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <script>
 /* PWA / Play Store: service worker səhifə açılan kimi qeydiyyatdan keçir (girişdən asılı deyil).
    PWABuilder və Android (TWA) quraşdırma yoxlaması bunu tələb edir. */
@@ -27,6 +27,18 @@ if ('serviceWorker' in navigator) {
     });
   });
 }
+/* Telefonun yuxarısında (bildiriş panelində) sistem bildirişi göstərir. */
+window.showSystemNotif = async function(title, body, tag){
+  try {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+    var reg = ('serviceWorker' in navigator) ? await navigator.serviceWorker.ready : null;
+    var opts = { body: body || '', icon: 'icon-192.png', badge: 'icon-96.png', tag: tag || 'bakugo', renotify: true,
+                 vibrate: [300, 120, 300], data: { url: './' } };
+    if (reg && reg.showNotification) await reg.showNotification(title || 'BakuGo', opts);
+    else new Notification(title || 'BakuGo', opts);
+    return true;
+  } catch (e) { console.warn('Sistem bildirişi göstərilmədi:', e); return false; }
+};
 </script>
 <script>
 /* ===== GOOGLE MAPS — BakuGo xəritə qatı =====
@@ -1934,6 +1946,10 @@ GPS AKTİV
 </div>
 
 <div id="notifyModal" class="modal">
+<div id="notifPermBox" style="display:none;margin-bottom:14px;padding:14px;border-radius:16px;border:1px solid rgba(212,175,55,0.45);background:linear-gradient(160deg,#1a1508,#0a0a0a);">
+  <div style="font-size:13px;line-height:1.5;opacity:0.85;">Yeni sifariş və admin mesajlarını telefonun bildiriş panelində görmək üçün icazə verin.</div>
+  <div class="premiumBtn" style="margin-top:10px;" onclick="window.initPush && window.initPush(true)">🔔 Telefon bildirişlərini aç</div>
+</div>
 <h3 style="color:#d4af37; margin-bottom:15px;">🔔 Bildirişlər</h3>
 <div id="notifyList"><div id="fbNotifyContainer"><p style="opacity:.6;text-align:center;font-size:13px;">Bildiriş yoxdur</p></div></div>
 <div class="close" onclick="closeModal('notifyModal')">Bağla</div>
@@ -2259,14 +2275,21 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
      Boş qalsa, Firebase-in standart açarı işlədilir və push yenə işləyir. */
   const VAPID_KEY = "";
 
-  window.initPush = async () => {
+  window.initPush = async (interactive) => {
+    const say = (m) => { if (interactive) { try { toast(m); } catch(e){} } };
     try {
       const supported = await isSupported().catch(() => false);
-      if (!supported) { console.warn("Bu brauzer/mühit push-u dəstəkləmir."); return; }
+      if (!supported) { console.warn("Bu brauzer/mühit push-u dəstəkləmir."); say("Bu cihaz push bildirişlərini dəstəkləmir."); return; }
       if (!window.auth.currentUser) return;
 
-      const permission = await Notification.requestPermission();
-      if (permission !== "granted") { console.warn("Bildiriş icazəsi verilmədi."); return; }
+      let permission = Notification.permission;
+      if (permission === "default") permission = await Notification.requestPermission();
+      if (typeof window.updateNotifPermBox === 'function') window.updateNotifPermBox();
+      if (permission !== "granted") {
+        console.warn("Bildiriş icazəsi verilmədi.");
+        say("🔕 Bildiriş icazəsi bağlıdır. Telefon Ayarlar → Tətbiqlər → BakuGo Kuryer → Bildirişlər bölməsindən açın.");
+        return;
+      }
 
       const registration = (await (window.__swReady || Promise.resolve(null)))
                           || await navigator.serviceWorker.register("./sw.js", { scope: "./" });
@@ -2277,8 +2300,11 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
       const token = await getToken(messaging, tokenOpts);
 
       if (token) {
-        await setDoc(doc(db, "couriers", window.auth.currentUser.uid), { fcmToken: token }, { merge: true });
+        await setDoc(doc(db, "couriers", window.auth.currentUser.uid), { fcmToken: token, fcmTokenUpdatedAt: new Date() }, { merge: true });
         console.log("✅ Push token qeydə alındı");
+        say("🔔 Bildirişlər aktivdir");
+      } else {
+        say("Bildiriş tokeni alınmadı, bir az sonra yenidən cəhd edin.");
       }
 
       // Tətbiq açıq olanda (foreground) gələn bildirişlər
@@ -2292,6 +2318,7 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
       });
     } catch (e) {
       console.error("Push init xətası:", e);
+      say("Bildiriş qoşulmadı: " + ((e && (e.code || e.message)) || 'naməlum xəta'));
     }
   };
 
@@ -2860,8 +2887,15 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
       catch(e){}
   }
   window.latestNotifItems = [];
+  window.updateNotifPermBox = function(){
+      const box = document.getElementById('notifPermBox');
+      if (!box) return;
+      const ok = ('Notification' in window) && Notification.permission === 'granted';
+      box.style.display = ok ? 'none' : 'block';
+  };
   window.openNotifications = function(){
       openModal('notifyModal');
+      window.updateNotifPermBox();
       const readIds = getReadNotifIds();
       window.latestNotifItems.forEach(n => readIds.add(n.id));
       saveReadNotifIds(readIds);
@@ -2900,7 +2934,13 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
             snapshot.docChanges().forEach((change) => {
                 if (change.type === "added") {
                     const n = change.doc.data();
-                    if (navigator.vibrate) navigator.vibrate(200);
+                    if (navigator.vibrate) navigator.vibrate([300, 120, 300]);
+                    try { toast('🔔 ' + (n.title || 'Yeni bildiriş')); } catch(e){}
+                    if (window.showSystemNotif) window.showSystemNotif(n.title || 'BakuGo Kuryer', n.body || '', 'notif-' + change.doc.id);
+                    if (window.notifSoundEnabled !== false) {
+                        const a = document.getElementById('notifSound');
+                        if (a) { try { a.currentTime = 0; a.play().catch(()=>{}); } catch(e){} }
+                    }
                 }
             });
         }
@@ -2929,6 +2969,7 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
         console.error("Index-li bildiriş sorğusu uğursuz oldu, fallback-a keçirik:", err);
         onSnapshot(qFallback, handleCourierNotifSnapshot, (fallbackErr) => {
             console.error("Bildirişlər yüklənmə xətası:", fallbackErr);
+            try { toast('⚠️ Bildirişlər oxunmadı: ' + ((fallbackErr && fallbackErr.code) || 'xəta')); } catch(e){}
         });
     });
   };
@@ -3414,6 +3455,7 @@ s.style.left='calc(50% - 5px)';
 panel.classList.add('active');
 status.classList.remove('active');
 window.loadCourierData(true);
+if (typeof window.initPush === 'function') window.initPush();
 enablePremium();
 startLiveTracking();
 if (typeof window.listenLiveOrders === 'function') { window.listenLiveOrders(); }
