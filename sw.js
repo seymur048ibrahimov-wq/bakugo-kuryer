@@ -1,129 +1,118 @@
-/* =====================================================================
-   BakuGo — Kuryer — Service Worker
-   • Oflayn iş: tətbiqin qabığı keşdə saxlanılır (internet kəsiləndə də açılır)
-   • Push bildirişləri: Firebase Cloud Messaging (FCM) mesajlarını göstərir
-   • Bildirişə toxunanda tətbiq açılır / önə gəlir
-   Firestore/Firebase/Google sorğuları KEŞLƏNMİR — canlı məlumat həmişə serverdən gəlir.
-   ===================================================================== */
-const APP = 'kuryer';
-const VERSION = 'bakugo-' + APP + '-20261107-1929';
-const HTML = './kuryer.html';
+/* BakuGo Kuryer — Service Worker
+   1) Offline dəstəyi (PWABuilder və Play/TWA yoxlaması üçün)
+   2) Firebase Cloud Messaging — tətbiq bağlı olanda push bildirişləri
+   Bu fayl index.html ilə EYNİ qovluqda olmalıdır. */
+
+const CACHE = 'bakugo-kuryer-v1';
 const PRECACHE = [
-  HTML,
-  './kuryer-manifest.json',
-  './icons/kuryer-96.png',
-  './icons/kuryer-192.png',
-  './icons/kuryer-512.png',
-  './icons/kuryer-maskable-512.png',
-  './icons/kuryer-badge.png'
+  './',
+  './index.html',
+  './offline.html',
+  './manifest.json',
+  './icons/icon-192.png',
+  './icons/icon-512.png',
+  './icons/maskable-512.png'
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil((async () => {
-    const cache = await caches.open(VERSION);
-    /* biri tapılmasa belə qalanları keşlə (addAll hamısını ləğv edərdi) */
-    await Promise.all(PRECACHE.map((u) => cache.add(new Request(u, { cache: 'reload' })).catch(() => {})));
-    await self.skipWaiting();
-  })());
+  event.waitUntil(
+    caches.open(CACHE)
+      .then((c) => Promise.all(PRECACHE.map((u) => c.add(u).catch(() => null))))
+      .then(() => self.skipWaiting())
+  );
 });
 
 self.addEventListener('activate', (event) => {
-  event.waitUntil((async () => {
-    const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k.startsWith('bakugo-' + APP + '-') && k !== VERSION).map((k) => caches.delete(k)));
-    if (self.registration.navigationPreload) { try { await self.registration.navigationPreload.enable(); } catch (e) {} }
-    await self.clients.claim();
-  })());
+  event.waitUntil(
+    caches.keys()
+      .then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k))))
+      .then(() => self.clients.claim())
+  );
 });
 
-self.addEventListener('message', (event) => {
-  if (event.data === 'SKIP_WAITING' || (event.data && event.data.type === 'SKIP_WAITING')) self.skipWaiting();
-});
-
-/* ---------------- Oflayn keş ---------------- */
 self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;           /* Firebase, Google Maps və s. — toxunma */
+  // Yalnız öz saytımızın fayllarını idarə edirik. Firebase, xəritə, OSRM və s. birbaşa şəbəkədən gedir.
+  if (url.origin !== self.location.origin) return;
 
+  // Səhifə açılışı: əvvəl şəbəkə (həmişə ən son versiya), internet yoxdursa keş, o da yoxdursa offline.html
   if (req.mode === 'navigate') {
-    /* Səhifə: əvvəl internet (həmişə ən yeni versiya), alınmasa keş */
-    event.respondWith((async () => {
-      try {
-        const preload = event.preloadResponse ? await event.preloadResponse : null;
-        const res = preload || await fetch(req);
-        if (res && res.ok) { const c = await caches.open(VERSION); c.put(HTML, res.clone()).catch(() => {}); }
-        return res;
-      } catch (e) {
-        const c = await caches.open(VERSION);
-        return (await c.match(HTML)) ||
-          new Response('<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>BakuGo</title>' +
-            '<body style="margin:0;height:100vh;display:flex;align-items:center;justify-content:center;font-family:system-ui;background:#111;color:#eee;text-align:center">' +
-            '<div><div style="font-size:42px">📡</div><h2>İnternet bağlantısı yoxdur</h2><p style="opacity:.7">Bağlantı bərpa olunanda səhifəni yeniləyin.</p></div>',
-            { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
-      }
-    })());
+    event.respondWith(
+      fetch(req)
+        .then((res) => {
+          const copy = res.clone();
+          caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+          return res;
+        })
+        .catch(() =>
+          caches.match(req)
+            .then((r) => r || caches.match('./index.html'))
+            .then((r) => r || caches.match('./offline.html'))
+        )
+    );
     return;
   }
 
-  /* Statik fayllar (ikon, manifest, şəkil): keşdən dərhal, arxada yenilə */
-  event.respondWith((async () => {
-    const c = await caches.open(VERSION);
-    const hit = await c.match(req);
-    const net = fetch(req).then((res) => { if (res && res.ok && res.type === 'basic') c.put(req, res.clone()).catch(() => {}); return res; }).catch(() => null);
-    return hit || (await net) || new Response('', { status: 504 });
-  })());
+  // İkon, manifest və digər statik fayllar: keş, sonra şəbəkə
+  event.respondWith(
+    caches.match(req).then((cached) => cached || fetch(req).then((res) => {
+      if (res && res.ok) {
+        const copy = res.clone();
+        caches.open(CACHE).then((c) => c.put(req, copy)).catch(() => {});
+      }
+      return res;
+    }))
+  );
 });
 
-/* ---------------- Push bildirişləri ---------------- */
-function readPayload(event) {
-  let raw = {};
-  try { raw = event.data ? event.data.json() : {}; } catch (e) { try { raw = { data: { body: event.data.text() } }; } catch (x) {} }
-  const d = Object.assign({}, raw.data || {}, (raw.notification || {}));
-  /* FCM bəzən mesajı "data" altında, bəzən birbaşa göndərir */
-  ['title', 'body', 'url', 'tag', 'icon', 'image', 'requireInteraction', 'sound'].forEach((k) => { if (d[k] == null && raw[k] != null) d[k] = raw[k]; });
-  return d;
+/* ---------- FIREBASE PUSH (FCM) ---------- */
+// importScripts xəta versə belə (zəif internet), SW-nin offline hissəsi işləməyə davam edir.
+try {
+  importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js');
+  importScripts('https://www.gstatic.com/firebasejs/10.14.1/firebase-messaging-compat.js');
+
+  firebase.initializeApp({
+    apiKey: "AIzaSyBQIDfObXpxNa1hVAYDmigSi9u49y_BJQc",
+    authDomain: "bkaugo.firebaseapp.com",
+    projectId: "bkaugo",
+    storageBucket: "bkaugo.firebasestorage.app",
+    messagingSenderId: "568740538737",
+    appId: "1:568740538737:web:9b2ab40d0b728789a1aed0"
+  });
+
+  const messaging = firebase.messaging();
+
+  // Mesajda "notification" hissəsi varsa, Firebase onu özü göstərir (ikiqat bildiriş olmasın deyə burada göstərmirik).
+  // Yalnız "data" mesajlarını özümüz göstəririk.
+  messaging.onBackgroundMessage((payload) => {
+    if (payload && payload.notification) return;
+    const d = (payload && payload.data) || {};
+    self.registration.showNotification(d.title || '🔔 Yeni sifariş!', {
+      body: d.body || 'Yeni sifariş gəldi. Qəbul etmək üçün toxunun.',
+      icon: './icons/icon-192.png',
+      badge: './icons/icon-96.png',
+      tag: d.orderId || 'bakugo-order',
+      renotify: true,
+      requireInteraction: true,
+      vibrate: [400, 150, 400, 150, 400],
+      data: { url: d.url || './' }
+    });
+  });
+} catch (e) {
+  console.warn('Firebase Messaging SW-də yüklənmədi:', e);
 }
-
-self.addEventListener('push', (event) => {
-  const d = readPayload(event);
-  const title = d.title || 'BakuGo';
-  const options = {
-    body: d.body || '',
-    icon: d.icon || './icons/kuryer-192.png',
-    badge: './icons/kuryer-badge.png',
-    image: d.image || undefined,
-    tag: d.tag || undefined,
-    renotify: !!d.tag,
-    requireInteraction: d.requireInteraction === '1' || d.requireInteraction === true,
-    vibrate: [220, 120, 220, 120, 320],
-    timestamp: Date.now(),
-    data: { url: d.url || HTML, orderId: d.orderId || '' }
-  };
-  event.waitUntil((async () => {
-    await self.registration.showNotification(title, options);
-    /* açıq tətbiqə xəbər ver (səs, toast, siyahını yeniləmək üçün) */
-    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    list.forEach((c) => c.postMessage({ type: 'bakugo-push', title, body: options.body, data: d }));
-  })());
-});
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const target = new URL((event.notification.data && event.notification.data.url) || HTML, self.location.href).href;
-  event.waitUntil((async () => {
-    const list = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    for (const c of list) {
-      if (c.url.split('#')[0].split('?')[0] === new URL(HTML, self.location.href).href) {
-        await c.focus();
-        c.postMessage({ type: 'bakugo-push-click', data: event.notification.data || {} });
-        return;
+  const target = new URL((event.notification.data && event.notification.data.url) || './', self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((list) => {
+      for (const c of list) {
+        if (c.url.startsWith(self.registration.scope) && 'focus' in c) return c.focus();
       }
-    }
-    await self.clients.openWindow(target);
-  })());
+      return self.clients.openWindow(target);
+    })
+  );
 });
-
-/* Brauzer push abunəliyini yeniləyəndə tətbiq açılan kimi token yenidən yazılacaq */
-self.addEventListener('pushsubscriptionchange', () => {});
