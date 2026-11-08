@@ -2,1026 +2,256 @@
 <html lang="az">
 <head>
 <meta charset="UTF-8">
-<!-- Google Maps (bütün xəritələr) -->
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>BakuGo Kuryer</title>
+<meta name="description" content="BakuGo Kuryer — BakuGo çatdırılma platformasının kuryerləri üçün sifariş qəbulu, naviqasiya və qazanc tətbiqi.">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="BakuGo Kuryer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
 <script>
-/* =====================================================================
-   BakuGo — GOOGLE MAPS ADAPTERİ
-   Tətbiqdəki bütün xəritələr Google Maps ilə işləyir. Köhnə kod Leaflet
-   sintaksisi (L.map, L.marker, ...) ilə yazıldığı üçün burada həmin
-   funksiyalar Google Maps JavaScript API üzərində yenidən qurulub.
-   Ünvan axtarışı / tərs axtarış -> Google Geocoding + Places,
-   marşrut məsafəsi/vaxtı -> Google Directions (Routes API ehtiyat).
-   Google Cloud-da aktiv olmalıdır: Maps JavaScript API, Geocoding API,
-   Places API (New), Directions API (və ya Routes API).
-   ===================================================================== */
-(function(){
-  'use strict';
-  if (window.BGMap) return;
-
-  var GMAPS_KEY = 'AIzaSyAQcVU7_ac2e73cMF__xd_t40Xu2kJchF4';
-  var BAKU = { lat: 40.4093, lng: 49.8671 };
-
-  var gm = null;               /* google.maps hazır olanda */
-  var RL = null;               /* ehtiyat xəritə (Leaflet) — Google açarı işləməyəndə */
-  var engine = null;           /* 'google' | 'leaflet' */
-  var gmBad = false;           /* Google açarı rədd edildi / Google yüklənmədi */
-  var readyCbs = [];
-  var failed = false, failMsg = '';
-  var allMaps = [];
-  var _fetch = window.fetch ? window.fetch.bind(window) : null;
-
-  var ready = new Promise(function(res, rej){
-    readyCbs.push(function(err){ err ? rej(err) : res(); });
+/* PWA / Play Store: service worker səhifə açılan kimi qeydiyyatdan keçir (girişdən asılı deyil).
+   PWABuilder və Android (TWA) quraşdırma yoxlaması bunu tələb edir. */
+if ('serviceWorker' in navigator) {
+  window.__swReady = new Promise(function(resolve){
+    window.addEventListener('load', function(){
+      navigator.serviceWorker.register('./sw.js', { scope: './' })
+        .then(function(reg){ resolve(reg); })
+        .catch(function(e){ console.warn('SW qeydiyyatı alınmadı:', e); resolve(null); });
+    });
   });
-  ready.catch(function(){});
-  function fireReady(err){ var c = readyCbs; readyCbs = []; c.forEach(function(f){ try { f(err); } catch(e){ console.error(e); } }); }
+}
+</script>
+<script>
+/* ===== GOOGLE MAPS — BakuGo xəritə qatı =====
+   Tətbiqdəki bütün xəritə yerləri (kuryer, restoran, müştəri, populyar yerlər, marşrut) Google Maps ilə işləyir.
+   Köhnə kod Leaflet üslubunda yazıldığı üçün eyni adlı funksiyalar (L.map, L.marker, L.Routing...) burada
+   Google Maps üzərində yenidən qurulub — beləliklə sifariş/izləmə məntiqinə toxunulmayıb. */
+(function(){
+  var GMAPS_KEY = 'AIzaSyAQcVU7_ac2e73cMF__xd_t40Xu2kJchF4';
+  var ready = false, queue = [];
+  function whenReady(fn){ if (ready) fn(); else queue.push(fn); }
+  window.__gmWhenReady = whenReady;
 
-  function setEngine(e){ engine = e; allMaps.slice().forEach(function(m){ try { m._build(); } catch(x){ console.error(x); } }); }
+  var DARK = [
+    {elementType:'geometry',stylers:[{color:'#1d2330'}]},
+    {elementType:'labels.text.fill',stylers:[{color:'#c9b98a'}]},
+    {elementType:'labels.text.stroke',stylers:[{color:'#11151d'}]},
+    {featureType:'poi',elementType:'labels.icon',stylers:[{visibility:'off'}]},
+    {featureType:'poi.park',elementType:'geometry',stylers:[{color:'#1f3a2c'}]},
+    {featureType:'road',elementType:'geometry',stylers:[{color:'#2f3848'}]},
+    {featureType:'road',elementType:'geometry.stroke',stylers:[{color:'#212a37'}]},
+    {featureType:'road.highway',elementType:'geometry',stylers:[{color:'#6b5a2a'}]},
+    {featureType:'road.highway',elementType:'geometry.stroke',stylers:[{color:'#3d3418'}]},
+    {featureType:'transit',elementType:'geometry',stylers:[{color:'#2a3140'}]},
+    {featureType:'water',elementType:'geometry',stylers:[{color:'#0b1f33'}]},
+    {featureType:'water',elementType:'labels.text.fill',stylers:[{color:'#4e6d8c'}]}
+  ];
 
-  /* Google işləmədi -> xəritələr avtomatik ehtiyat xəritəyə keçir (tətbiq dayanmır).
-     Google açarı düzələn kimi (billing/API/domen) yenidən Google Maps açılacaq. */
-  function showFail(msg){
-    if (gmBad) return;
-    gmBad = true; failMsg = msg;
-    console.warn('⚠️ Google Maps: ' + msg + ' — müvəqqəti ehtiyat xəritə göstərilir.');
-    fireReady(new Error(msg));
-    loadLeaflet().then(function(){ setEngine('leaflet'); }).catch(function(){
-      failed = true; allMaps.forEach(function(m){ m._showFail(); });
+  function toLL(a, b){
+    if (Array.isArray(a)) return { lat: +a[0], lng: +a[1] };
+    if (a && typeof a === 'object') return { lat: +a.lat, lng: +a.lng };
+    return { lat: +a, lng: +b };
+  }
+  function distM(a, b){
+    var R = 6371000, dLat = (b.lat-a.lat)*Math.PI/180, dLng = (b.lng-a.lng)*Math.PI/180;
+    var x = Math.sin(dLat/2)*Math.sin(dLat/2) + Math.cos(a.lat*Math.PI/180)*Math.cos(b.lat*Math.PI/180)*Math.sin(dLng/2)*Math.sin(dLng/2);
+    return R*2*Math.atan2(Math.sqrt(x), Math.sqrt(1-x));
+  }
+
+  /* --- HTML marker (köhnə divIcon dizaynları olduğu kimi qalır) --- */
+  var HtmlOverlay = null;
+  function defineOverlay(){
+    HtmlOverlay = function(m){ this.m = m; };
+    HtmlOverlay.prototype = new google.maps.OverlayView();
+    HtmlOverlay.prototype.onAdd = function(){ this.getPanes().overlayMouseTarget.appendChild(this.m._el); };
+    HtmlOverlay.prototype.draw = function(){
+      var p = this.getProjection(); if (!p) return;
+      var pt = p.fromLatLngToDivPixel(new google.maps.LatLng(this.m._ll.lat, this.m._ll.lng)); if (!pt) return;
+      this.m._el.style.left = (pt.x - this.m._ax) + 'px';
+      this.m._el.style.top  = (pt.y - this.m._ay) + 'px';
+    };
+    HtmlOverlay.prototype.onRemove = function(){ if (this.m._el.parentNode) this.m._el.parentNode.removeChild(this.m._el); };
+  }
+
+  function Marker(ll, opts){
+    var ic = (opts && opts.icon) || { html:'<div style="width:16px;height:16px;border-radius:50%;background:#0a84ff;border:2px solid #fff"></div>', iconSize:[16,16] };
+    var sz = ic.iconSize || [0,0], an = ic.iconAnchor || [sz[0]/2, sz[1]/2];
+    this._ll = toLL(ll); this._ax = an[0]; this._ay = an[1];
+    this._el = document.createElement('div');
+    this._el.style.cssText = 'position:absolute;cursor:pointer;width:'+sz[0]+'px;height:'+sz[1]+'px;';
+    if (ic.className) this._el.className = ic.className;
+    this._el.innerHTML = ic.html || '';
+    this._map = null; this._ov = null; this._popup = null; this._iw = null;
+    var self = this;
+    this._el.addEventListener('click', function(e){ e.stopPropagation(); self.openPopup(); });
+  }
+  Marker.prototype.addTo = function(t){ if (t && t._isGroup) t._add(this); else if (t) this._attach(t); return this; };
+  Marker.prototype._attach = function(m){
+    var self = this; this._map = m; m._layers.add(this);
+    m._whenMap(function(g){ if (self._map !== m) return; if (!self._ov) self._ov = new HtmlOverlay(self); self._ov.setMap(g); });
+  };
+  Marker.prototype.remove = function(){
+    if (this._ov) this._ov.setMap(null);
+    if (this._iw) this._iw.close();
+    if (this._map) this._map._layers.delete(this);
+    this._map = null; return this;
+  };
+  Marker.prototype.setLatLng = function(a, b){ this._ll = toLL(a, b); if (this._ov) this._ov.draw(); if (this._iw) this._iw.setPosition(this._ll); return this; };
+  Marker.prototype.getLatLng = function(){ return { lat: this._ll.lat, lng: this._ll.lng }; };
+  Marker.prototype.getElement = function(){ return this._el; };
+  Marker.prototype.bindPopup = function(h){ this._popup = h; return this; };
+  Marker.prototype.openPopup = function(){
+    var self = this; if (!this._popup || !this._map) return this;
+    this._map._whenMap(function(g){
+      if (!self._iw) self._iw = new google.maps.InfoWindow({ pixelOffset: new google.maps.Size(0, -self._ay) });
+      self._iw.setContent('<div style="color:#111;font-size:13px;line-height:1.4">' + self._popup + '</div>');
+      self._iw.setPosition(self._ll); self._iw.open({ map: g });
+    });
+    return this;
+  };
+
+  function Group(){ this._isGroup = true; this._items = []; this._map = null; }
+  Group.prototype._add = function(m){ this._items.push(m); if (this._map) m._attach(this._map); };
+  Group.prototype.addTo = function(map){ var self = this; this._map = map; map._layers.add(this); this._items.forEach(function(m){ m._attach(map); }); return this; };
+  Group.prototype.remove = function(){ this._items.forEach(function(m){ m.remove(); }); if (this._map) this._map._layers.delete(this); this._map = null; return this; };
+
+  /* --- Xəritə --- */
+  function GMap(id){
+    this._el = typeof id === 'string' ? document.getElementById(id) : id;
+    this._center = { lat: 40.4093, lng: 49.8671 }; this._zoom = 13;
+    this._type = 'roadmap'; this._dark = true;
+    this._g = null; this._q = []; this._layers = new Set();
+    var self = this;
+    whenReady(function(){
+      self._g = new google.maps.Map(self._el, {
+        center: self._center, zoom: self._zoom, mapTypeId: self._type,
+        styles: (self._dark && self._type === 'roadmap') ? DARK : null,
+        disableDefaultUI: true, gestureHandling: 'greedy', clickableIcons: false, backgroundColor: '#0d0d0d'
+      });
+      var q = self._q; self._q = []; q.forEach(function(f){ try { f(self._g); } catch(e){ console.error(e); } });
     });
   }
-  var lfPromise = null;
-  function loadLeaflet(){ /* xəritə Google Maps-dir (BGMap) */ return Promise.resolve(); }
+  GMap.prototype._whenMap = function(fn){ if (this._g) fn(this._g); else this._q.push(fn); };
+  GMap.prototype.setView = function(ll, z){
+    this._center = toLL(ll); if (z != null) this._zoom = z;
+    var c = this._center, zz = this._zoom;
+    this._whenMap(function(g){ g.setCenter(c); g.setZoom(zz); }); return this;
+  };
+  GMap.prototype.invalidateSize = function(){ return this; };   /* Google Maps ölçünü özü izləyir */
+  GMap.prototype.getContainer = function(){ return this._el; };
+  GMap.prototype.removeLayer = function(l){ if (l && l.remove) l.remove(); return this; };
+  GMap.prototype.setLook = function(type, dark){
+    this._type = type; this._dark = dark;
+    this._whenMap(function(g){ g.setMapTypeId(type); g.setOptions({ styles: (dark && type === 'roadmap') ? DARK : null }); });
+  };
 
-  /* ---------- Google Maps JS API-ni yüklə ---------- */
-  window.__bgGmInit = async function(){
-    try {
-      var libs = ['maps', 'marker', 'geocoding', 'routes', 'geometry'];
-      for (var i = 0; i < libs.length; i++) { try { await google.maps.importLibrary(libs[i]); } catch(e){ console.warn('Google Maps kitabxanası yüklənmədi:', libs[i], e); } }
-      try { await google.maps.importLibrary('places'); } catch(e){ console.warn('Places kitabxanası yüklənmədi', e); }
-      gm = google.maps;
-      buildOverlayClass();
-      if (gmBad) return;
-      fireReady(null);
-      setEngine('google');
-    } catch(e){ showFail('Google Maps başladıla bilmədi'); }
+  /* --- Marşrut: əvvəl Google Directions, alınmasa OSRM (xəritədə yenə Google üzərində çəkilir) --- */
+  function googleRoute(from, to){
+    return new Promise(function(res, rej){
+      if (window.__gmDirDisabled) return rej(new Error('directions-disabled'));
+      var t = setTimeout(function(){ rej(new Error('maps-timeout')); }, 8000);
+      whenReady(function(){
+        clearTimeout(t);
+        try {
+          new google.maps.DirectionsService().route({
+            origin: from, destination: to, travelMode: google.maps.TravelMode.DRIVING, region: 'AZ'
+          }, function(r, status){
+            if (status === 'OK' && r.routes && r.routes[0]) {
+              var leg = r.routes[0].legs[0];
+              res({ meters: leg.distance.value, seconds: leg.duration.value,
+                    path: r.routes[0].overview_path.map(function(p){ return { lat: p.lat(), lng: p.lng() }; }) });
+            } else {
+              if (status === 'REQUEST_DENIED') { window.__gmDirDisabled = true; console.warn('Google Directions API aktiv deyil — OSRM işlədilir.'); }
+              rej(new Error(status));
+            }
+          });
+        } catch(e){ rej(e); }
+      });
+    });
+  }
+  function osrmRoute(from, to){
+    var url = 'https://router.project-osrm.org/route/v1/driving/' + from.lng + ',' + from.lat + ';' + to.lng + ',' + to.lat + '?overview=full&geometries=geojson';
+    return fetch(url).then(function(r){ return r.json(); }).then(function(d){
+      if (d.code !== 'Ok' || !d.routes || !d.routes[0]) throw new Error('OSRM');
+      return { meters: d.routes[0].distance, seconds: d.routes[0].duration,
+               path: d.routes[0].geometry.coordinates.map(function(c){ return { lat: c[1], lng: c[0] }; }) };
+    });
+  }
+  window.__bakugoRoute = function(from, to){
+    from = toLL(from); to = toLL(to);
+    return googleRoute(from, to).catch(function(){ return osrmRoute(from, to); });
+  };
+
+  function Routing(opts){
+    this._o = opts || {}; this._wps = []; this._map = null; this._h = {}; this._lines = [];
+    this._key = ''; this._t = 0; this._from = null; this._seq = 0;
+  }
+  Routing.prototype.addTo = function(m){ this._map = m; return this; };
+  Routing.prototype.on = function(ev, fn){ (this._h[ev] = this._h[ev] || []).push(fn); return this; };
+  Routing.prototype._emit = function(ev, d){ (this._h[ev] || []).forEach(function(f){ try { f(d); } catch(e){ console.error(e); } }); };
+  Routing.prototype.getWaypoints = function(){ return this._wps.map(function(p){ return { latLng: p }; }); };
+  Routing.prototype._clear = function(){ this._lines.forEach(function(l){ l.setMap(null); }); this._lines = []; };
+  Routing.prototype.setWaypoints = function(arr){
+    arr = (arr || []).filter(Boolean).map(function(p){ return toLL(p.latLng || p); });
+    this._wps = arr;
+    if (arr.length < 2) { this._seq++; this._clear(); this._key = ''; return this; }
+    var from = arr[0], to = arr[arr.length - 1];
+    var key = to.lat.toFixed(5) + ',' + to.lng.toFixed(5), now = Date.now();
+    var moved = this._from ? distM(this._from, from) : 1e9;
+    /* Xərcə qənaət: eyni təyinat üçün marşrut yalnız 30 san. keçəndə və ya kuryer 80 m+ hərəkət edəndə yenilənir */
+    if (key === this._key && now - this._t < 30000 && moved < 80) return this;
+    var isNew = key !== this._key;
+    this._key = key; this._t = now; this._from = from;
+    var self = this, seq = ++this._seq;
+    window.__bakugoRoute(from, to).then(function(r){
+      if (seq !== self._seq || !self._map) return;
+      self._map._whenMap(function(g){
+        self._clear();
+        var styles = (self._o.lineOptions && self._o.lineOptions.styles) || [{ color:'#0a5fd6', weight:6, opacity:0.95 }];
+        styles.forEach(function(s, i){
+          self._lines.push(new google.maps.Polyline({ path: r.path, strokeColor: s.color, strokeWeight: s.weight, strokeOpacity: s.opacity, zIndex: 10 + i, clickable: false, map: g }));
+        });
+        if (isNew && self._o.fitSelectedRoutes !== false) {
+          var b = new google.maps.LatLngBounds(); r.path.forEach(function(p){ b.extend(p); });
+          g.fitBounds(b, 60);
+        }
+      });
+      self._emit('routesfound', { routes: [{ summary: { totalDistance: r.meters, totalTime: r.seconds } }] });
+    }).catch(function(e){ console.warn('Marşrut qurulmadı:', e && e.message); });
+    return this;
+  };
+
+  window.L = {
+    map: function(id){ return new GMap(id); },
+    marker: function(ll, o){ return new Marker(ll, o); },
+    divIcon: function(o){ return o || {}; },
+    layerGroup: function(){ return new Group(); },
+    latLng: function(a, b){ return toLL(a, b); },
+    Routing: { control: function(o){ return new Routing(o); } }
+  };
+
+  window.__gmReady = function(){
+    ready = true; defineOverlay();
+    var q = queue; queue = []; q.forEach(function(f){ try { f(); } catch(e){ console.error(e); } });
   };
   window.gm_authFailure = function(){
-    showFail('Google Maps API açarı qəbul edilmədi (billing / API aktivləşdirmə / açar məhdudiyyəti yoxlanmalıdır).');
+    console.error('Google Maps açarı bu ünvan üçün icazəli deyil (API key / referrer məhdudiyyəti).');
+    try { toast('⚠️ Google Maps açarı bu ünvan üçün icazəli deyil'); } catch(e){}
   };
-  (function load(){
-    var s = document.createElement('script');
-    s.async = true;
-    s.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_KEY +
-            '&v=weekly&loading=async&language=az&region=AZ&libraries=places,geometry&callback=__bgGmInit';
-    s.onerror = function(){ showFail('Google Maps serverinə qoşulmaq olmadı.'); };
-    (document.head || document.documentElement).appendChild(s);
-    /* 15 saniyəyə Google cavab verməsə, ehtiyat xəritəyə keç */
-    setTimeout(function(){ if (!engine && !gmBad) showFail('Google Maps vaxtında yüklənmədi.'); }, 15000);
-  })();
-
-  /* ---------- köməkçilər ---------- */
-  function toLL(a, b){
-    if (a == null) return null;
-    if (typeof a === 'number' || typeof a === 'string') return { lat: parseFloat(a), lng: parseFloat(b) };
-    if (Array.isArray(a)) return { lat: parseFloat(a[0]), lng: parseFloat(a[1]) };
-    if (typeof a.lat === 'function') return { lat: a.lat(), lng: a.lng() };
-    if (a.latLng) return toLL(a.latLng);
-    return { lat: parseFloat(a.lat), lng: parseFloat(a.lng != null ? a.lng : a.lon) };
-  }
-  function okLL(p){ return p && isFinite(p.lat) && isFinite(p.lng); }
-  function LatLng(lat, lng){ this.lat = lat; this.lng = lng; }
-  LatLng.prototype.distanceTo = function(o){
-    o = toLL(o); var R = 6371000, r = Math.PI / 180;
-    var dLat = (o.lat - this.lat) * r, dLng = (o.lng - this.lng) * r;
-    var x = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(this.lat*r) * Math.cos(o.lat*r) * Math.sin(dLng/2) * Math.sin(dLng/2);
-    return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
-  };
-  LatLng.prototype.equals = function(o){ o = toLL(o); return o && Math.abs(o.lat - this.lat) < 1e-9 && Math.abs(o.lng - this.lng) < 1e-9; };
-  function mkLL(p){ return p ? new LatLng(p.lat, p.lng) : null; }
-  function padNum(p){ if (p == null) return 0; return Array.isArray(p) ? Math.max(+p[0] || 0, +p[1] || 0) : (+p || 0); }
-
-  /* Kiçik hadisə sistemi (Leaflet-dəki .on/.off/.fire) */
-  function Evented(){}
-  Evented.prototype.on = function(t, fn){ var self = this; String(t).split(/\s+/).forEach(function(k){ if (!k) return; (self._ev = self._ev || {})[k] = (self._ev[k] || []).concat([fn]); if (self._onBind) self._onBind(k); }); return this; };
-  Evented.prototype.once = function(t, fn){ var self = this; var w = function(e){ self.off(t, w); fn.call(self, e); }; return this.on(t, w); };
-  Evented.prototype.off = function(t, fn){ if (!this._ev) return this; if (!t) { this._ev = {}; return this; } if (!fn) delete this._ev[t]; else this._ev[t] = (this._ev[t] || []).filter(function(f){ return f !== fn; }); return this; };
-  Evented.prototype.fire = function(t, e){ var self = this; e = e || {}; e.type = t; e.target = this; ((this._ev && this._ev[t]) || []).slice().forEach(function(f){ try { f.call(self, e); } catch(x){ console.error(x); } }); return this; };
-  Evented.prototype.listens = function(t){ return !!(this._ev && this._ev[t] && this._ev[t].length); };
-  function inherit(C, P){ C.prototype = Object.create(P.prototype); C.prototype.constructor = C; }
-
-  /* Gecə rejimi stili */
-  var DARK_STYLE = [
-    { elementType: 'geometry', stylers: [{ color: '#1d2230' }] },
-    { elementType: 'labels.text.stroke', stylers: [{ color: '#1d2230' }] },
-    { elementType: 'labels.text.fill', stylers: [{ color: '#8a93a6' }] },
-    { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#d4af37' }] },
-    { featureType: 'poi', elementType: 'labels.text.fill', stylers: [{ color: '#a08a4a' }] },
-    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#1f3a2e' }] },
-    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#343b4d' }] },
-    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#202533' }] },
-    { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#a3acc0' }] },
-    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#5a4a1f' }] },
-    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#2b2412' }] },
-    { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#2a3040' }] },
-    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#0f1726' }] },
-    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#4e6d8c' }] }
-  ];
-
-  /* Premium gündüz stili: yumşaq, təmiz, reklam/biznes nişanları gizli */
-  var LIGHT_STYLE = [
-    { elementType: 'geometry', stylers: [{ color: '#f5f3ef' }] },
-    { elementType: 'labels.text.fill', stylers: [{ color: '#5f6670' }] },
-    { elementType: 'labels.text.stroke', stylers: [{ color: '#ffffff' }, { weight: 3 }] },
-    { featureType: 'poi.business', stylers: [{ visibility: 'off' }] },
-    { featureType: 'poi', elementType: 'labels.icon', stylers: [{ saturation: -60 }, { lightness: 10 }] },
-    { featureType: 'poi.park', elementType: 'geometry', stylers: [{ color: '#dfeedd' }] },
-    { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#ffffff' }] },
-    { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#e6e1d8' }] },
-    { featureType: 'road.highway', elementType: 'geometry', stylers: [{ color: '#ffe2b8' }] },
-    { featureType: 'road.highway', elementType: 'geometry.stroke', stylers: [{ color: '#f3c98a' }] },
-    { featureType: 'transit', elementType: 'geometry', stylers: [{ color: '#ece8e1' }] },
-    { featureType: 'water', elementType: 'geometry', stylers: [{ color: '#bfdcef' }] },
-    { featureType: 'water', elementType: 'labels.text.fill', stylers: [{ color: '#5d8fb0' }] }
-  ];
-  function mapStyles(st){ return st.satellite ? null : (st.dark ? DARK_STYLE : LIGHT_STYLE); }
-  /* Premium marker (narıncı qradiyent damla + ağ nüvə) */
-  var PIN_URL = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(
-    "<svg xmlns='http://www.w3.org/2000/svg' width='40' height='52' viewBox='0 0 40 52'><defs>" +
-    "<linearGradient id='g' x1='0' y1='0' x2='0' y2='1'><stop offset='0' stop-color='#ffb347'/><stop offset='1' stop-color='#ff5722'/></linearGradient>" +
-    "<filter id='s' x='-30%' y='-20%' width='160%' height='150%'><feDropShadow dx='0' dy='3' stdDeviation='2.5' flood-color='#000' flood-opacity='.35'/></filter></defs>" +
-    "<path filter='url(#s)' d='M20 2C10.6 2 3 9.6 3 19c0 12.4 14.6 27.6 15.9 28.9.6.6 1.6.6 2.2 0C22.4 46.6 37 31.4 37 19 37 9.6 29.4 2 20 2z' fill='url(#g)' stroke='#fff' stroke-width='2.5'/>" +
-    "<circle cx='20' cy='19' r='6.5' fill='#fff'/><circle cx='20' cy='19' r='3' fill='#ff5722'/></svg>");
-
-  /* =================== XƏRİTƏ =================== */
-  function GMap(el, opts){
-    if (typeof el === 'string') el = document.getElementById(el);
-    if (!el) throw new Error('Xəritə konteyneri tapılmadı');
-    this._el = el; this._o = opts || {};
-    this._center = toLL(this._o.center) || { lat: BAKU.lat, lng: BAKU.lng };
-    this._zoom = this._o.zoom != null ? this._o.zoom : 13;
-    this._layers = []; this._g = null; this._removed = false;
-    this._style = { dark: false, satellite: false };
-    this._pendingFit = null; this._gl = [];
-    allMaps.push(this);
-    var self = this;
-    if (failed) this._showFail(); else if (engine) this._build();
-  }
-  inherit(GMap, Evented);
-  GMap.prototype._build = function(){
-    if (this._removed) return;
-    if (engine === 'leaflet') { this._teardownG(); this._createLf(); }
-    else if (engine === 'google') this._create();
-  };
-  GMap.prototype._teardownG = function(){
-    if (!this._g) return;
-    var self = this;
-    this._layers.slice().forEach(function(l){ try { l._detach(self); } catch(e){} });
-    this._gl.forEach(function(h){ try { h.remove(); } catch(e){} }); this._gl = [];
-    try { if (this._ro) this._ro.disconnect(); } catch(e){}
-    try { this._iw.close(); } catch(e){}
-    this._g = null; this._iw = null; this._bound = {};
-    try { this._el.innerHTML = ''; } catch(e){}
-  };
-  var LF_TILES = {
-    street: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
-    sat: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'
-  };
-  GMap.prototype._createLf = function(){
-    if (this._removed || this._lf || !RL) return;
-    var self = this;
-    this._lf = RL.map(this._el, { zoomControl: false }).setView([this._center.lat, this._center.lng], this._zoom);
-    this._applyLfTiles();
-    this._lf.on('click', function(e){ self.fire('click', { latlng: mkLL(toLL(e.latlng)) }); });
-    this._lf.on('moveend', function(){ if (!self._lf) return; var c = self._lf.getCenter(); self._center = { lat: c.lat, lng: c.lng }; self._zoom = self._lf.getZoom(); });
-    ['zoomend', 'moveend', 'dragstart', 'movestart', 'dragend'].forEach(function(t){ if (self.listens(t)) self._bindLf(t); });
-    this._layers.slice().forEach(function(l){ l._attach(self); });
-    var fix = function(){ try { if (self._lf) { self._lf.invalidateSize(); self._applyPendingFit(); } } catch(e){} };
-    [150, 600, 1500].forEach(function(t){ setTimeout(fix, t); });
-    try { if (window.ResizeObserver) { this._ro = new ResizeObserver(fix); this._ro.observe(this._el); } } catch(e){}
-    this._applyPendingFit();
-    this._decorate();
-    this.fire('load');
-  };
-  GMap.prototype._applyLfTiles = function(){
-    if (!this._lf) return;
-    if (this._tile) { try { this._lf.removeLayer(this._tile); } catch(e){} }
-    var sat = this._style.satellite, dark = this._style.dark && !sat;
-    this._tile = RL.tileLayer(sat ? LF_TILES.sat : LF_TILES.street, { maxZoom: 19, attribution: '&copy; Esri, OpenStreetMap', className: dark ? 'bg-lf-dark' : (sat ? '' : 'bg-lf-light') }).addTo(this._lf);
-  };
-  GMap.prototype._bindLf = function(t){
-    var self = this; this._boundLf = this._boundLf || {};
-    if (this._boundLf[t]) return; this._boundLf[t] = true;
-    this._lf.on(t, function(){ self.fire(t); });
-  };
-  GMap.prototype._create = function(){
-    if (this._removed || this._g) return;
-    var self = this, o = this._o;
-    if (getComputedStyle(this._el).position === 'static') this._el.style.position = 'relative';
-    this._g = new gm.Map(this._el, {
-      center: this._center, zoom: this._zoom,
-      disableDefaultUI: true, zoomControl: false,
-      gestureHandling: 'greedy', clickableIcons: false, keyboardShortcuts: false,
-      mapTypeId: this._style.satellite ? 'hybrid' : 'roadmap',
-      styles: mapStyles(this._style)
-    });
-    this._iw = new gm.InfoWindow();
-    this._gl.push(this._g.addListener('click', function(e){ self._iw.close(); self._iwOwner = null; self.fire('click', { latlng: mkLL(toLL(e.latLng)) }); }));
-    this._gl.push(this._g.addListener('idle', function(){ var c = self._g.getCenter(); if (c) self._center = toLL(c); self._zoom = self._g.getZoom(); }));
-    ['zoomend', 'moveend', 'dragstart', 'movestart', 'dragend'].forEach(function(t){ if (self.listens(t)) self._bindG(t); });
-    try {
-      if (window.ResizeObserver) { this._ro = new ResizeObserver(function(){ self._applyPendingFit(); }); this._ro.observe(this._el); }
-    } catch(e){}
-    this._layers.slice().forEach(function(l){ l._attach(self); });
-    if (this._pendingFit) this._applyPendingFit();
-    this._decorate();
-    this.fire('load');
-  };
-  /* =================== PREMIUM ŞÜŞƏ QAT =================== */
-  function mk(cls, html){ var d = document.createElement('div'); d.className = cls; if (html) d.innerHTML = html; return d; }
-  function stopMap(el){ ['mousedown', 'touchstart', 'dblclick', 'pointerdown', 'wheel', 'click'].forEach(function(t){ el.addEventListener(t, function(e){ e.stopPropagation(); }, { passive: true }); }); }
-  GMap.prototype._decorate = function(){
-    var el = this._el, self = this;
-    try {
-      el.classList.add('bg-map-premium');
-      this._syncDark();
-      var big = el.offsetHeight >= 480;                     /* tam ekran xəritə (kuryer) */
-      el.classList.toggle('bg-map-full', big);
-      /* 1) yüklənmə parıltısı */
-      var loader = mk('bg-map-loader', '<div class="bg-map-loader-ring"></div>');
-      el.appendChild(loader);
-      var hide = function(){ if (loader.parentNode) { loader.classList.add('done'); setTimeout(function(){ try { loader.remove(); } catch(e){} }, 600); } };
-      if (this._g) gm.event.addListenerOnce(this._g, 'tilesloaded', hide);
-      if (this._tile && this._tile.once) this._tile.once('load', hide);
-      setTimeout(hide, 4500);
-      /* 2) buzlu şüşə çərçivə, 3) şüşə işıqlar, 4) keçən parıltı, 5) animasiyalı qızılı haşiyə */
-      el.appendChild(mk('bg-map-bezel'));
-      el.appendChild(mk('bg-map-glass'));
-      el.appendChild(mk('bg-map-sheen'));
-      el.appendChild(mk('bg-map-border'));
-      /* 6) canlı nişan (kiçik xəritələrdə) */
-      if (!big) el.appendChild(mk('bg-map-badge', '<i></i><b>BakuGo</b><span>Canlı xəritə</span>'));
-      /* 7) şüşə idarə paneli: + / − / mənim yerim */
-      if (this._o.zoomControl !== false) {
-        var z = mk('bg-map-zoom',
-          '<button type="button" aria-label="Yaxınlaşdır">+</button><span></span>' +
-          '<button type="button" aria-label="Uzaqlaşdır">&minus;</button><span></span>' +
-          '<button type="button" class="bg-loc" aria-label="Mənim yerim"><svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg></button>');
-        var bs = z.querySelectorAll('button');
-        bs[0].addEventListener('click', function(e){ e.preventDefault(); self.zoomIn(); });
-        bs[1].addEventListener('click', function(e){ e.preventDefault(); self.zoomOut(); });
-        if (bs[2]) bs[2].addEventListener('click', function(e){ e.preventDefault(); self._locate(bs[2]); });
-        stopMap(z);
-        el.appendChild(z);
-      }
-    } catch(e){}
-  };
-  GMap.prototype._locate = function(btn){
-    var self = this;
-    if (!navigator.geolocation) return;
-    btn.classList.add('busy');
-    navigator.geolocation.getCurrentPosition(function(pos){
-      btn.classList.remove('busy');
-      var p = [pos.coords.latitude, pos.coords.longitude];
-      if (!self._me) self._me = new Marker(p, { icon: new DivIcon({ className: '', html: '<div class="bg-me-dot"><i></i></div>', iconSize: [22, 22], iconAnchor: [11, 11] }) }).addTo(self);
-      else self._me.setLatLng(p);
-      self.flyTo(p, Math.max(self.getZoom() || 15, 16));
-    }, function(){ btn.classList.remove('busy'); btn.classList.add('err'); setTimeout(function(){ btn.classList.remove('err'); }, 900); },
-    { enableHighAccuracy: true, timeout: 8000, maximumAge: 15000 });
-  };
-  GMap.prototype._syncDark = function(){
-    try { this._el.classList.toggle('bg-map-dark', !!(this._style.dark || this._style.satellite)); } catch(e){}
-  };
-  var G_EVT = { zoomend: 'zoom_changed', moveend: 'idle', dragstart: 'dragstart', movestart: 'dragstart', dragend: 'dragend' };
-  GMap.prototype._onBind = function(t){ if (this._g && G_EVT[t]) this._bindG(t); if (this._lf && G_EVT[t]) this._bindLf(t); };
-  GMap.prototype._bindG = function(t){
-    var self = this; this._bound = this._bound || {};
-    if (this._bound[t]) return; this._bound[t] = true;
-    this._gl.push(this._g.addListener(G_EVT[t], function(){ self.fire(t); }));
-  };
-  GMap.prototype._showFail = function(){
-    try {
-      if (this._removed) return;
-      this._el.innerHTML = '<div style="height:100%;min-height:120px;display:flex;align-items:center;justify-content:center;padding:14px;text-align:center;font:13px/1.45 sans-serif;color:#666;background:#f1f1f1;">' +
-        'Xəritə yüklənmədi. ' + (failMsg || '') + '</div>';
-    } catch(e){}
-  };
-  GMap.prototype.whenReady = function(fn){ var self = this; if (this._g || this._lf) fn.call(self); else this.once('load', function(){ fn.call(self); }); return this; };
-  GMap.prototype.getContainer = function(){ return this._el; };
-  GMap.prototype.setView = function(c, z){
-    var p = toLL(c); if (okLL(p)) this._center = p; if (z != null) this._zoom = z;
-    this._pendingFit = null;
-    if (this._g) { if (okLL(p)) this._g.setCenter(p); if (z != null) this._g.setZoom(z); }
-    if (this._lf) { if (okLL(p)) this._lf.setView([p.lat, p.lng], z != null ? z : this._lf.getZoom()); else if (z != null) this._lf.setZoom(z); }
-    return this;
-  };
-  GMap.prototype.panTo = function(c){ var p = toLL(c); if (!okLL(p)) return this; this._center = p; if (this._g) this._g.panTo(p); if (this._lf) this._lf.panTo([p.lat, p.lng]); return this; };
-  GMap.prototype.flyTo = function(c, z){ var p = toLL(c); if (!okLL(p)) return this; this._center = p; if (z != null) this._zoom = z; if (this._g) { this._g.panTo(p); if (z != null) this._g.setZoom(z); } if (this._lf) this._lf.flyTo([p.lat, p.lng], z != null ? z : this._lf.getZoom()); return this; };
-  GMap.prototype.setZoom = function(z){ this._zoom = z; if (this._g) this._g.setZoom(z); if (this._lf) this._lf.setZoom(z); return this; };
-  GMap.prototype.getZoom = function(){ return this._g ? this._g.getZoom() : this._lf ? this._lf.getZoom() : this._zoom; };
-  GMap.prototype.zoomIn = function(){ return this.setZoom(this.getZoom() + 1); };
-  GMap.prototype.zoomOut = function(){ return this.setZoom(this.getZoom() - 1); };
-  GMap.prototype.getCenter = function(){ var c = this._g ? this._g.getCenter() : this._lf ? this._lf.getCenter() : null; return mkLL(c ? toLL(c) : this._center); };
-  GMap.prototype.getBounds = function(){
-    if (this._lf) { var lb = this._lf.getBounds(); return { getSouthWest: function(){ return mkLL(toLL(lb.getSouthWest())); }, getNorthEast: function(){ return mkLL(toLL(lb.getNorthEast())); }, contains: function(p){ p = toLL(p); return lb.contains([p.lat, p.lng]); } }; }
-    var b = this._g && this._g.getBounds(); if (!b) return null;
-    var sw = toLL(b.getSouthWest()), ne = toLL(b.getNorthEast());
-    return { getSouthWest: function(){ return mkLL(sw); }, getNorthEast: function(){ return mkLL(ne); },
-      contains: function(p){ p = toLL(p); return b.contains(p); } };
-  };
-  GMap.prototype.fitBounds = function(pts, opts){
-    var list = [];
-    if (pts && typeof pts.getSouthWest === 'function') list = [toLL(pts.getSouthWest()), toLL(pts.getNorthEast())];
-    else (pts || []).forEach(function(p){ p = toLL(p); if (okLL(p)) list.push(p); });
-    if (!list.length) return this;
-    this._pendingFit = { pts: list, opts: opts || {} };
-    this._applyPendingFit();
-    return this;
-  };
-  GMap.prototype._applyPendingFit = function(){
-    var f = this._pendingFit; if (!f || (!this._g && !this._lf)) return;
-    if (!this._el.offsetWidth || !this._el.offsetHeight) return; /* gizlidir: görünəndə tətbiq olunacaq */
-    this._pendingFit = null;
-    if (this._lf) {
-      var lo = f.opts, pad = padNum(lo.padding);
-      if (f.pts.length === 1) this._lf.setView([f.pts[0].lat, f.pts[0].lng], lo.maxZoom || 16);
-      else this._lf.fitBounds(f.pts.map(function(p){ return [p.lat, p.lng]; }), { padding: [pad, pad], maxZoom: lo.maxZoom });
-      return;
-    }
-    var g = this._g, o = f.opts;
-    if (f.pts.length === 1) { g.setCenter(f.pts[0]); g.setZoom(o.maxZoom || 16); return; }
-    var b = new gm.LatLngBounds(); f.pts.forEach(function(p){ b.extend(p); });
-    g.fitBounds(b, padNum(o.padding));
-    if (o.maxZoom) gm.event.addListenerOnce(g, 'idle', function(){ if (g.getZoom() > o.maxZoom) g.setZoom(o.maxZoom); });
-  };
-  GMap.prototype.invalidateSize = function(){
-    if (this._g) { try { gm.event.trigger(this._g, 'resize'); } catch(e){} this._applyPendingFit(); }
-    if (this._lf) { try { this._lf.invalidateSize(); } catch(e){} this._applyPendingFit(); }
-    return this;
-  };
-  GMap.prototype.addLayer = function(l){ if (l) l.addTo(this); return this; };
-  GMap.prototype.removeLayer = function(l){ if (l && l._map === this) l.remove(); return this; };
-  GMap.prototype.hasLayer = function(l){ return !!l && l._map === this; };
-  GMap.prototype.eachLayer = function(fn){ this._layers.slice().forEach(fn); return this; };
-  GMap.prototype.closePopup = function(){ if (this._iw) this._iw.close(); if (this._lf) this._lf.closePopup(); return this; };
-  GMap.prototype.remove = function(){
-    this._removed = true;
-    this._layers.slice().forEach(function(l){ try { l.remove(); } catch(e){} });
-    this._gl.forEach(function(h){ try { h.remove(); } catch(e){} }); this._gl = [];
-    try { if (this._ro) this._ro.disconnect(); } catch(e){}
-    if (this._iw) try { this._iw.close(); } catch(e){}
-    if (this._lf) { try { this._lf.remove(); } catch(e){} this._lf = null; }
-    this._g = null; this._ev = {};
-    try { this._el.innerHTML = ''; } catch(e){}
-    var i = allMaps.indexOf(this); if (i >= 0) allMaps.splice(i, 1);
-    return this;
-  };
-  /* Görünüş: gecə rejimi və peyk */
-  GMap.prototype.setGoogleStyle = function(st){
-    st = st || {};
-    this._style = { dark: !!st.dark, satellite: !!st.satellite };
-    if (this._g) this._g.setOptions({ mapTypeId: this._style.satellite ? 'hybrid' : 'roadmap', styles: mapStyles(this._style) });
-    if (this._lf) this._applyLfTiles();
-    this._syncDark();
-    return this;
-  };
-  GMap.prototype.getGoogleMap = function(){ return this._g; };
-
-  /* =================== LAYER bazası =================== */
-  function Layer(){}
-  inherit(Layer, Evented);
-  Layer.prototype.addTo = function(t){
-    if (t instanceof LayerGroup) { t.addLayer(this); return this; }
-    if (this._map === t) return this;
-    if (this._map) this.remove();
-    this._map = t; t._layers.push(this);
-    if (t._g || t._lf) this._attach(t);
-    return this;
-  };
-  Layer.prototype.remove = function(){
-    var m = this._map; if (!m) return this;
-    this._map = null;
-    var i = m._layers.indexOf(this); if (i >= 0) m._layers.splice(i, 1);
-    this._detach(m);
-    return this;
-  };
-  Layer.prototype.removeFrom = function(m){ if (m instanceof LayerGroup) m.removeLayer(this); else if (this._map === m) this.remove(); return this; };
-  Layer.prototype._attach = function(){};
-  Layer.prototype._detach = function(){};
-  Layer.prototype.bindPopup = function(html){ this._popup = html; return this; };
-  Layer.prototype.unbindPopup = function(){ this._popup = null; return this; };
-  Layer.prototype.setPopupContent = function(html){ this._popup = html; return this; };
-  Layer.prototype.getPopup = function(){ var s = this; return this._popup == null ? null : { setContent: function(h){ s._popup = h; return this; }, getContent: function(){ return s._popup; } }; };
-  Layer.prototype.bindTooltip = function(html){ this._tooltip = html; return this; };
-  Layer.prototype.openPopup = function(){
-    if (this._popup == null) return this;
-    var m = this._map;
-    if (!m || (!m._g && !m._lf)) { this._wantPopup = true; return this; }
-    this._wantPopup = false;
-    var html = typeof this._popup === 'function' ? this._popup(this) : this._popup;
-    if (m._lf) {
-      var pp = this._popupPos ? this._popupPos() : null; if (!okLL(pp)) return this;
-      m._lf.openPopup(String(html), [pp.lat, pp.lng], { offset: this._lfOffset ? this._lfOffset() : [0, 7] });
-      return this;
-    }
-    m._iw.setContent(String(html));
-    this._openIW(m);
-    return this;
-  };
-  Layer.prototype.closePopup = function(){ if (this._map && this._map._iw) this._map._iw.close(); if (this._map && this._map._lf) this._map._lf.closePopup(); return this; };
-  Layer.prototype._openIW = function(m){ m._iw.setOptions({ pixelOffset: null }); m._iw.setPosition(this._popupPos ? this._popupPos() : null); m._iw.open({ map: m._g }); m._iwOwner = this; };
-  Layer.prototype._clicked = function(e){
-    this.fire('click', { latlng: mkLL(e && e.latLng ? toLL(e.latLng) : (this.getLatLng ? this.getLatLng() : null)) });
-    if (this._popup != null) this.openPopup();
-  };
-
-  /* =================== MARKER =================== */
-  function DivIcon(o){ this.options = o || {}; this._div = true; }
-  function Icon(o){ this.options = o || {}; this._div = false; }
-  function Marker(ll, opts){ this._ll = toLL(ll); this.options = opts || {}; this._icon = this.options.icon || null; this._buildEl(); }
-  inherit(Marker, Layer);
-  Marker.prototype._isHtml = function(){ return !!(this._icon && this._icon._div); };
-  Marker.prototype._buildEl = function(){
-    if (!this._isHtml()) { this._el = null; return; }
-    var o = this._icon.options, d = this._el || document.createElement('div');
-    d.className = 'bg-gm-divicon' + (o.className ? ' ' + o.className : '');
-    d.style.position = 'absolute'; d.style.cursor = 'pointer';
-    var sz = o.iconSize || [24, 24];
-    if (sz) { d.style.width = sz[0] + 'px'; d.style.height = sz[1] + 'px'; }
-    var html = o.html;
-    if (html && html.nodeType) { d.innerHTML = ''; d.appendChild(html); } else d.innerHTML = html == null ? '' : html;
-    this._anchor = o.iconAnchor || (sz ? [sz[0] / 2, sz[1] / 2] : [0, 0]);
-    this._el = d;
-  };
-  Marker.prototype.getElement = function(){ return this._el || null; };
-  Marker.prototype.getLatLng = function(){ return mkLL(this._ll); };
-  Marker.prototype.setLatLng = function(ll){
-    var p = toLL(ll); if (!okLL(p)) return this;
-    this._ll = p;
-    if (this._gm) this._gm.setPosition(p);
-    if (this._ov) this._ov.draw();
-    if (this._lfm) this._lfm.setLatLng([p.lat, p.lng]);
-    if (this._ov && this._map && this._map._iw && this._map._iwOwner === this) this._map._iw.setPosition(this._ll);
-    this.fire('move', { latlng: mkLL(p) });
-    return this;
-  };
-  Marker.prototype.setIcon = function(icon){
-    var m = this._map; if (m) this._detach(m);
-    this._icon = icon; this.options.icon = icon; this._buildEl();
-    if (m && m._g) this._attach(m);
-    return this;
-  };
-  Marker.prototype.setOpacity = function(o){ this.options.opacity = o; if (this._gm) this._gm.setOpacity(o); if (this._lfm) this._lfm.setOpacity(o); if (this._el) this._el.style.opacity = o; return this; };
-  Marker.prototype.setZIndexOffset = function(z){ this.options.zIndexOffset = z; if (this._gm) this._gm.setZIndex(z); if (this._el) this._el.style.zIndex = z; return this; };
-  Marker.prototype._popupPos = function(){ return this._ll; };
-  Marker.prototype._openIW = function(m){
-    m._iw.setPosition(null);
-    if (this._gm) { m._iw.setOptions({ pixelOffset: null }); m._iw.open({ map: m._g, anchor: this._gm }); }
-    else { m._iw.setOptions({ pixelOffset: new gm.Size(0, -(this._anchor ? this._anchor[1] : 0)) }); m._iw.setPosition(this._ll); m._iw.open({ map: m._g }); }
-    m._iwOwner = this;
-  };
-  Marker.prototype._lfOffset = function(){ return [0, 7 - (this._isHtml() ? (this._anchor ? this._anchor[1] : 0) : 46)]; };
-  Marker.prototype._attachLf = function(m){
-    var self = this, o = { draggable: !!this.options.draggable };
-    if (this._isHtml()) {
-      var ic = this._icon.options;
-      this._el.style.position = 'static'; this._el.style.left = ''; this._el.style.top = '';
-      o.icon = RL.divIcon({ className: 'bg-lf-divicon', html: this._el, iconSize: ic.iconSize || [24, 24], iconAnchor: this._anchor });
-    } else if (this._icon && this._icon.options && this._icon.options.iconUrl) o.icon = RL.icon(this._icon.options);
-    else o.icon = RL.icon({ iconUrl: PIN_URL, iconSize: [40, 52], iconAnchor: [20, 49], popupAnchor: [0, -44] });
-    if (this.options.opacity != null) o.opacity = this.options.opacity;
-    if (this.options.zIndexOffset != null) o.zIndexOffset = this.options.zIndexOffset;
-    this._lfm = RL.marker([this._ll.lat, this._ll.lng], o).addTo(m._lf);
-    this._lfm.on('click', function(){ self._clicked(null); });
-    this._lfm.on('dragstart', function(){ self.fire('dragstart'); });
-    this._lfm.on('drag', function(){ self._ll = toLL(self._lfm.getLatLng()); self.fire('drag', { latlng: mkLL(self._ll) }); });
-    this._lfm.on('dragend', function(){ self._ll = toLL(self._lfm.getLatLng()); self.fire('dragend', { latlng: mkLL(self._ll) }); });
-    if (this._wantPopup) this.openPopup();
-  };
-  Marker.prototype._attach = function(m){
-    var self = this;
-    if (m._lf) return this._attachLf(m);
-    if (this._el) this._el.style.position = 'absolute';
-    if (this._isHtml()) {
-      this._ov = new HtmlOverlay(this);
-      this._ov.setMap(m._g);
-    } else {
-      var mo = { position: this._ll, map: m._g, draggable: !!this.options.draggable, title: this.options.title || '' };
-      if (this.options.opacity != null) mo.opacity = this.options.opacity;
-      if (this.options.zIndexOffset != null) mo.zIndex = this.options.zIndexOffset;
-      var ic = this._icon && this._icon.options;
-      if (!(ic && ic.iconUrl)) { mo.icon = { url: PIN_URL, scaledSize: new gm.Size(40, 52), anchor: new gm.Point(20, 49) }; mo.anchorPoint = new gm.Point(0, -46); }
-      if (ic && ic.iconUrl) mo.icon = { url: ic.iconUrl, scaledSize: ic.iconSize ? new gm.Size(ic.iconSize[0], ic.iconSize[1]) : undefined, anchor: ic.iconAnchor ? new gm.Point(ic.iconAnchor[0], ic.iconAnchor[1]) : undefined };
-      this._gm = new gm.Marker(mo);
-      this._gl = [
-        this._gm.addListener('click', function(e){ self._clicked(e); }),
-        this._gm.addListener('dragstart', function(){ self.fire('dragstart'); }),
-        this._gm.addListener('drag', function(){ self._ll = toLL(self._gm.getPosition()); self.fire('drag', { latlng: mkLL(self._ll) }); }),
-        this._gm.addListener('dragend', function(){ self._ll = toLL(self._gm.getPosition()); self.fire('dragend', { latlng: mkLL(self._ll) }); })
-      ];
-    }
-    if (this._wantPopup) this.openPopup();
-  };
-  Marker.prototype._detach = function(m){
-    if (this._lfm) { try { this._lfm.remove(); } catch(e){} this._lfm = null; }
-    if (this._gm) { (this._gl || []).forEach(function(h){ h.remove(); }); this._gm.setMap(null); this._gm = null; }
-    if (this._ov) { this._ov.setMap(null); this._ov = null; }
-    if (m && m._iw && m._iwOwner === this) { m._iw.close(); m._iwOwner = null; }
-  };
-
-  /* HTML (divIcon) markerləri üçün OverlayView */
-  var HtmlOverlay = null;
-  function buildOverlayClass(){
-    HtmlOverlay = class extends gm.OverlayView {
-      constructor(owner){ super(); this.o = owner; }
-      onAdd(){
-        var o = this.o, d = o._el;
-        if (!d) return;
-        if (!d.__bgClick) {
-          d.__bgClick = true;
-          d.addEventListener('click', function(ev){ if (!o._ov) return; ev.stopPropagation(); o._clicked(null); });
-        }
-        try { gm.OverlayView.preventMapHitsAndGesturesFrom(d); } catch(e){}
-        this.getPanes().overlayMouseTarget.appendChild(d);
-      }
-      draw(){
-        var pr = this.getProjection(), o = this.o, d = o._el;
-        if (!pr || !d || !okLL(o._ll)) return;
-        var p = pr.fromLatLngToDivPixel(new gm.LatLng(o._ll.lat, o._ll.lng));
-        if (!p) return;
-        d.style.left = (p.x - o._anchor[0]) + 'px';
-        d.style.top = (p.y - o._anchor[1]) + 'px';
-      }
-      onRemove(){ var d = this.o._el; if (d && d.parentNode) d.parentNode.removeChild(d); }
-    };
-  }
-
-  /* =================== XƏTT / DAİRƏ =================== */
-  function strokeOpts(o, dflt){
-    o = o || {};
-    var r = { strokeColor: o.color || dflt || '#3388ff', strokeWeight: o.weight != null ? o.weight : 3, strokeOpacity: o.opacity != null ? o.opacity : 1, clickable: false };
-    if (o.dashArray) {
-      var parts = String(o.dashArray).split(/[\s,]+/).map(Number), gap = (parts[0] || 6) + (parts[1] || parts[0] || 6);
-      r.icons = [{ icon: { path: 'M 0,-1 0,1', strokeOpacity: r.strokeOpacity, strokeColor: r.strokeColor, scale: Math.max(1, r.strokeWeight / 1.5) }, offset: '0', repeat: gap + 'px' }];
-      r.strokeOpacity = 0;
-    }
-    return r;
-  }
-  function Polyline(pts, opts){ this._pts = (pts || []).map(function(p){ return toLL(p); }).filter(okLL); this.options = opts || {}; }
-  inherit(Polyline, Layer);
-  Polyline.prototype._attach = function(m){ if (m._lf) { this._lfp = RL.polyline(this._pts.map(function(p){ return [p.lat, p.lng]; }), this.options).addTo(m._lf); return; } var o = strokeOpts(this.options); o.path = this._pts; o.map = m._g; o.zIndex = this.options.zIndex; this._g = new gm.Polyline(o); };
-  Polyline.prototype._detach = function(){ if (this._lfp) { this._lfp.remove(); this._lfp = null; } if (this._g) { this._g.setMap(null); this._g = null; } };
-  Polyline.prototype.setLatLngs = function(pts){ this._pts = (pts || []).map(function(p){ return toLL(p); }).filter(okLL); if (this._lfp) this._lfp.setLatLngs(this._pts.map(function(p){ return [p.lat, p.lng]; })); if (this._g) this._g.setPath(this._pts); return this; };
-  Polyline.prototype.getLatLngs = function(){ return this._pts.map(mkLL); };
-  Polyline.prototype.addLatLng = function(p){ p = toLL(p); if (okLL(p)) { this._pts.push(p); if (this._g) this._g.setPath(this._pts); if (this._lfp) this._lfp.addLatLng([p.lat, p.lng]); } return this; };
-  Polyline.prototype.setStyle = function(o){ for (var k in o) this.options[k] = o[k]; if (this._lfp) this._lfp.setStyle(o); if (this._g) this._g.setOptions(strokeOpts(this.options)); return this; };
-  Polyline.prototype.getBounds = function(){ return boundsOf(this._pts); };
-  Polyline.prototype._popupPos = function(){ return this._pts[Math.floor(this._pts.length / 2)] || null; };
-
-  function Circle(ll, opts){ this._ll = toLL(ll); this.options = opts || {}; }
-  inherit(Circle, Layer);
-  Circle.prototype._gopts = function(){
-    var o = this.options, s = strokeOpts(o);
-    return { center: this._ll, radius: +o.radius || 10, strokeColor: s.strokeColor, strokeWeight: s.strokeWeight, strokeOpacity: s.strokeOpacity || 1,
-      fillColor: o.fillColor || s.strokeColor, fillOpacity: o.fillOpacity != null ? o.fillOpacity : 0.2, clickable: false };
-  };
-  Circle.prototype._attach = function(m){ if (m._lf) { this._lfc = RL.circle([this._ll.lat, this._ll.lng], this.options).addTo(m._lf); return; } var o = this._gopts(); o.map = m._g; this._g = new gm.Circle(o); };
-  Circle.prototype._detach = function(){ if (this._lfc) { this._lfc.remove(); this._lfc = null; } if (this._g) { this._g.setMap(null); this._g = null; } };
-  Circle.prototype.setLatLng = function(ll){ var p = toLL(ll); if (okLL(p)) { this._ll = p; if (this._g) this._g.setCenter(p); if (this._lfc) this._lfc.setLatLng([p.lat, p.lng]); } return this; };
-  Circle.prototype.getLatLng = function(){ return mkLL(this._ll); };
-  Circle.prototype.setRadius = function(r){ this.options.radius = r; if (this._g) this._g.setRadius(r); if (this._lfc) this._lfc.setRadius(r); return this; };
-  Circle.prototype.getRadius = function(){ return this.options.radius; };
-  Circle.prototype.setStyle = function(o){ for (var k in o) this.options[k] = o[k]; if (this._lfc) this._lfc.setStyle(o); if (this._g) this._g.setOptions(this._gopts()); return this; };
-  Circle.prototype._popupPos = function(){ return this._ll; };
-
-  /* Plitə qatı — Google Maps özü plitə verir, ona görə yalnız uyğunluq üçün boş obyektdir */
-  function TileLayer(){ }
-  inherit(TileLayer, Layer);
-  TileLayer.prototype.redraw = function(){ return this; };
-  TileLayer.prototype.setUrl = function(){ return this; };
-
-  /* =================== QRUP =================== */
-  function LayerGroup(layers){ this._items = []; this._map = null; var s = this; (layers || []).forEach(function(l){ s.addLayer(l); }); }
-  inherit(LayerGroup, Evented);
-  LayerGroup.prototype.addLayer = function(l){ if (!l || this._items.indexOf(l) >= 0) return this; this._items.push(l); if (this._map) Layer.prototype.addTo.call(l, this._map); return this; };
-  LayerGroup.prototype.removeLayer = function(l){ var i = this._items.indexOf(l); if (i >= 0) { this._items.splice(i, 1); l.remove(); } return this; };
-  LayerGroup.prototype.hasLayer = function(l){ return this._items.indexOf(l) >= 0; };
-  LayerGroup.prototype.clearLayers = function(){ this._items.slice().forEach(function(l){ l.remove(); }); this._items = []; return this; };
-  LayerGroup.prototype.eachLayer = function(fn){ this._items.slice().forEach(fn); return this; };
-  LayerGroup.prototype.getLayers = function(){ return this._items.slice(); };
-  LayerGroup.prototype.addTo = function(m){
-    if (this._map === m) return this; if (this._map) this.remove();
-    this._map = m; m._layers.push(this);
-    this._items.forEach(function(l){ Layer.prototype.addTo.call(l, m); });
-    return this;
-  };
-  LayerGroup.prototype.remove = function(){
-    var m = this._map; if (!m) return this; this._map = null;
-    var i = m._layers.indexOf(this); if (i >= 0) m._layers.splice(i, 1);
-    this._items.forEach(function(l){ l.remove(); });
-    return this;
-  };
-  LayerGroup.prototype._attach = function(){}; /* elementlər öz-özünə bağlanır */
-  LayerGroup.prototype._detach = function(){};
-  LayerGroup.prototype.getBounds = function(){ var pts = []; this._items.forEach(function(l){ if (l.getLatLng) pts.push(toLL(l.getLatLng())); }); return boundsOf(pts); };
-
-  function boundsOf(pts){
-    pts = pts.filter(okLL); if (!pts.length) return null;
-    var s = 90, w = 180, n = -90, e = -180;
-    pts.forEach(function(p){ s = Math.min(s, p.lat); n = Math.max(n, p.lat); w = Math.min(w, p.lng); e = Math.max(e, p.lng); });
-    return { getSouthWest: function(){ return mkLL({ lat: s, lng: w }); }, getNorthEast: function(){ return mkLL({ lat: n, lng: e }); },
-      getCenter: function(){ return mkLL({ lat: (s + n) / 2, lng: (w + e) / 2 }); }, isValid: function(){ return true; },
-      contains: function(p){ p = toLL(p); return p.lat >= s && p.lat <= n && p.lng >= w && p.lng <= e; } };
-  }
-
-  /* =================== MARŞRUT (Leaflet Routing Machine əvəzi) =================== */
-  function RoutingControl(o){
-    this.options = o || {}; this._wps = []; this._lines = []; this._seq = 0; this._last = null;
-    var self = this;
-    (this.options.waypoints || []).forEach(function(w){ var p = toLL(w); if (okLL(p)) self._wps.push({ latLng: mkLL(p) }); });
-  }
-  inherit(RoutingControl, Layer);
-  RoutingControl.prototype._attach = function(m){ this._drawLines(m); if (this._wps.length > 1 && !this._path) this.route(); };
-  RoutingControl.prototype._detach = function(){ this._clearLines(); };
-  RoutingControl.prototype.getWaypoints = function(){ return this._wps.slice(); };
-  RoutingControl.prototype.setWaypoints = function(list){
-    var self = this; this._wps = [];
-    (list || []).forEach(function(w){ var p = toLL(w); if (okLL(p)) self._wps.push({ latLng: mkLL(p) }); });
-    if (this._wps.length < 2) { this._seq++; this._path = null; this._clearLines(); return this; }
-    this.route();
-    return this;
-  };
-  RoutingControl.prototype.spliceWaypoints = function(i, n){
-    var add = Array.prototype.slice.call(arguments, 2).map(function(w){ return { latLng: mkLL(toLL(w)) }; });
-    var a = this._wps.slice(); a.splice.apply(a, [i, n].concat(add));
-    this.setWaypoints(a.map(function(w){ return w.latLng; }));
-    return this._wps;
-  };
-  RoutingControl.prototype._clearLines = function(){ this._lines.forEach(function(l){ if (l.setMap) l.setMap(null); else l.remove(); }); this._lines = []; };
-  RoutingControl.prototype._drawLines = function(m){
-    this._clearLines();
-    if (!m || (!m._g && !m._lf) || !this._path || this._path.length < 2) return;
-    var styles = (this.options.lineOptions && this.options.lineOptions.styles) || [{ color: '#0a5fd6', weight: 6, opacity: 0.9 }];
-    var path = this._path, self = this;
-    var s0 = styles[0] || {}; styles = [{ color: s0.color || '#0a5fd6', weight: (s0.weight || 6) + 12, opacity: 0.16 }].concat(styles); /* parıltı */
-    if (m._lf) { var ll = path.map(function(p){ return [p.lat, p.lng]; }); styles.forEach(function(st){ self._lines.push(RL.polyline(ll, st).addTo(m._lf)); }); return; }
-    styles.forEach(function(s, i){ var o = strokeOpts(s); o.path = path; o.map = m._g; o.zIndex = 10 + i; self._lines.push(new gm.Polyline(o)); });
-  };
-  RoutingControl.prototype.route = function(){
-    var self = this, seq = ++this._seq;
-    var a = toLL(this._wps[0].latLng), b = toLL(this._wps[this._wps.length - 1].latLng);
-    /* Eyni hədəfə 10 saniyədən tez və 60 m-dən az yerdəyişmə ilə təkrar sorğu göndərmə (xərc qənaəti) */
-    var L0 = this._last, now = Date.now();
-    if (L0 && L0.res && Math.abs(L0.b.lat - b.lat) < 1e-6 && Math.abs(L0.b.lng - b.lng) < 1e-6 && now - L0.t < 10000 &&
-        new LatLng(L0.a.lat, L0.a.lng).distanceTo(a) < 60) return this;
-    BGMap.route(a, b).then(function(r){
-      if (seq !== self._seq) return;
-      if (!r) { self.fire('routingerror', { error: { message: 'Marşrut tapılmadı' } }); return; }
-      self._last = { a: a, b: b, t: Date.now(), res: true };
-      self._path = r.path && r.path.length > 1 ? r.path : [a, b];
-      var m = self._map;
-      if (m && (m._g || m._lf)) {
-        self._drawLines(m);
-        if (self.options.fitSelectedRoutes !== false) m.fitBounds(self._path, { padding: [40, 40] });
-      }
-      self.fire('routesfound', { routes: [{ summary: { totalDistance: r.distance, totalTime: r.duration }, coordinates: self._path.map(mkLL), waypoints: self._wps.map(function(w){ return w.latLng; }) }] });
-    });
-    return this;
-  };
-  RoutingControl.prototype.getPlan = function(){ return this; };
-  RoutingControl.prototype.hide = function(){ return this; };
-  RoutingControl.prototype.show = function(){ return this; };
-
-  /* =================== GEOKODLAŞDIRMA / MARŞRUT SERVİSLƏRİ =================== */
-  var disabled = {};
-  function addrFromComponents(comps, formatted){
-    var a = {}, get = function(t, short){ for (var i = 0; i < comps.length; i++) { var c = comps[i]; if ((c.types || []).indexOf(t) >= 0) return short ? (c.short_name || c.shortText) : (c.long_name || c.longText); } return ''; };
-    a.house_number = get('street_number');
-    a.road = get('route');
-    a.neighbourhood = get('neighborhood');
-    a.suburb = get('sublocality_level_1') || get('sublocality') || get('neighborhood');
-    a.city_district = get('sublocality_level_1') || get('administrative_area_level_2');
-    a.city = get('locality') || get('postal_town') || get('administrative_area_level_2');
-    a.state = get('administrative_area_level_1');
-    a.country = get('country');
-    a.country_code = (get('country', true) || '').toLowerCase();
-    a.postcode = get('postal_code');
-    a.building = get('premise') || get('establishment') || get('point_of_interest');
-    Object.keys(a).forEach(function(k){ if (!a[k]) delete a[k]; });
-    return a;
-  }
-  function geocoderReq(req){
-    return ready.then(function(){ return new gm.Geocoder().geocode(req); }).then(function(r){ return (r && r.results) || []; });
-  }
-  function bestReverse(results){
-    var pref = ['street_address', 'premise', 'subpremise', 'route', 'establishment', 'point_of_interest'];
-    for (var i = 0; i < pref.length; i++) for (var j = 0; j < results.length; j++) if ((results[j].types || []).indexOf(pref[i]) >= 0) return results[j];
-    return results[0] || null;
-  }
-  function placeToItem(p){
-    var loc = p.location ? toLL(p.location) : null;
-    var comps = (p.addressComponents || []).map(function(c){ return { long_name: c.longText, short_name: c.shortText, types: c.types }; });
-    var addr = addrFromComponents(comps);
-    return { lat: loc && loc.lat, lng: loc && loc.lng, name: p.displayName || '', formatted: p.formattedAddress || '', address: addr };
-  }
-
-  var BGMap = {
-    key: GMAPS_KEY,
-    ready: ready,
-    isReady: function(){ return !!gm; },
-    /* Mətndən koordinat: [{lat,lng,name,formatted,address}] */
-    search: async function(q, limit){
-      q = String(q || '').trim(); limit = limit || 7;
-      if (!q) return [];
-      await ready;
-      if (gmBad) throw new Error('Google açarı işləmir');
-      var out = [], errs = 0;
-      /* 1) Places (New) mətn axtarışı — məkan adları, restoranlar, ticarət mərkəzləri */
-      if (!disabled.places && gm.places && gm.places.Place && gm.places.Place.searchByText) {
-        try {
-          var r = await gm.places.Place.searchByText({
-            textQuery: q, fields: ['displayName', 'formattedAddress', 'location', 'addressComponents'],
-            locationBias: { center: BAKU, radius: 50000 }, maxResultCount: Math.min(limit, 20), language: 'az', region: 'az'
-          });
-          (r.places || []).forEach(function(p){ var it = placeToItem(p); if (okLL(it) && (!it.address.country_code || it.address.country_code === 'az')) out.push(it); });
-        } catch(e){ errs++; console.warn('Google Places axtarışı alınmadı:', e && e.message); if (/denied|not.*(enabled|activated|authorized)|PERMISSION|API_KEY/i.test(String(e && e.message))) disabled.places = true; }
-      }
-      /* 2) Geocoding — dəqiq ünvanlar (küçə, ev nömrəsi) */
-      if (out.length < limit) {
-        try {
-          var res = await geocoderReq({ address: q, componentRestrictions: { country: 'AZ' }, region: 'az', language: 'az' });
-          res.forEach(function(g){
-            var p = toLL(g.geometry.location);
-            if (out.some(function(o){ return Math.abs(o.lat - p.lat) < 1e-4 && Math.abs(o.lng - p.lng) < 1e-4; })) return;
-            out.push({ lat: p.lat, lng: p.lng, name: '', formatted: g.formatted_address, address: addrFromComponents(g.address_components || []) });
-          });
-        } catch(e){ if (!/ZERO_RESULTS/.test(String(e && (e.code || e.message)))) { errs++; console.warn('Google Geocoding alınmadı:', e && e.message); } }
-      }
-      if (!out.length && errs) throw new Error('Google axtarış xidmətləri cavab vermədi');
-      return out.slice(0, limit);
-    },
-    /* Koordinatdan ünvan: {formatted, address} və ya null */
-    reverse: async function(lat, lng){
-      await ready;
-      if (gmBad) throw new Error('Google açarı işləmir');
-      var res = await geocoderReq({ location: { lat: +lat, lng: +lng }, language: 'az' });
-      var g = bestReverse(res); if (!g) return null;
-      var addr = addrFromComponents(g.address_components || []);
-      /* küçə adı ilk nəticədə yoxdursa, digərlərindən tamamla */
-      if (!addr.road) for (var i = 0; i < res.length && !addr.road; i++) { var a2 = addrFromComponents(res[i].address_components || []); if (a2.road) { addr.road = a2.road; if (!addr.house_number && a2.house_number) addr.house_number = a2.house_number; } }
-      return { formatted: g.formatted_address, address: addr, lat: +lat, lng: +lng };
-    },
-    /* Real yol marşrutu: {distance (m), duration (san), path:[{lat,lng}]} və ya null */
-    route: async function(a, b){
-      a = toLL(a); b = toLL(b);
-      if (!okLL(a) || !okLL(b)) return null;
-      var key = [a.lat.toFixed(4), a.lng.toFixed(4), b.lat.toFixed(4), b.lng.toFixed(4)].join(',');
-      var c = routeCache[key];
-      if (c && Date.now() - c.t < 60000) return c.p;
-      var p = routeCalc(a, b).then(function(r){ if (!r) delete routeCache[key]; return r; });
-      routeCache[key] = { t: Date.now(), p: p };
-      return p;
-    },
-    /* Google Maps tətbiqində marşrutu aç */
-    navUrl: function(lat, lng){ return 'https://www.google.com/maps/dir/?api=1&destination=' + lat + ',' + lng + '&travelmode=driving'; }
-  };
-  var routeCache = {};
-  async function routeCalc(a, b){
-    var gOk = true;
-    try { await ready; } catch(e){ gOk = false; }
-    if (gmBad) gOk = false;
-    if (gOk && !disabled.directions && gm.DirectionsService) {
-      try {
-        var r = await new gm.DirectionsService().route({ origin: a, destination: b, travelMode: 'DRIVING', region: 'az' });
-        var rt = r && r.routes && r.routes[0];
-        if (rt && rt.legs && rt.legs.length) {
-          var d = 0, t = 0; rt.legs.forEach(function(l){ d += (l.distance && l.distance.value) || 0; t += (l.duration && l.duration.value) || 0; });
-          return { distance: d, duration: t, path: (rt.overview_path || []).map(toLL) };
-        }
-      } catch(e){
-        var msg = String(e && (e.code || e.message));
-        if (/REQUEST_DENIED|not.*(enabled|activated|authorized)|legacy/i.test(msg)) disabled.directions = true;
-        if (/ZERO_RESULTS|NOT_FOUND/.test(msg)) return null;
-        console.warn('Google Directions alınmadı:', msg);
-      }
-    }
-    /* Ehtiyat: Google Routes API */
-    if (gOk && !disabled.routesApi && _fetch) {
-      try {
-        var res = await _fetch('https://routes.googleapis.com/directions/v2:computeRoutes', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-Goog-Api-Key': GMAPS_KEY, 'X-Goog-FieldMask': 'routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline' },
-          body: JSON.stringify({ origin: { location: { latLng: { latitude: a.lat, longitude: a.lng } } }, destination: { location: { latLng: { latitude: b.lat, longitude: b.lng } } }, travelMode: 'DRIVE', languageCode: 'az', regionCode: 'az' })
-        });
-        if (res.status === 403) disabled.routesApi = true;
-        var j = await res.json();
-        var r0 = j && j.routes && j.routes[0];
-        if (r0) return { distance: r0.distanceMeters || 0, duration: parseFloat(r0.duration) || 0, path: decodePolyline(r0.polyline && r0.polyline.encodedPolyline) };
-      } catch(e){ console.warn('Google Routes API alınmadı:', e && e.message); }
-    }
-    /* Son ehtiyat: OSRM (Google marşrut xidməti işləməyəndə) */
-    if (_fetch) {
-      try {
-        var ores = await _fetch('https://router.project-osrm.org/route/v1/driving/' + a.lng + ',' + a.lat + ';' + b.lng + ',' + b.lat + '?overview=full&geometries=geojson');
-        var oj = await ores.json();
-        var o0 = oj && oj.code === 'Ok' && oj.routes && oj.routes[0];
-        if (o0) return { distance: o0.distance, duration: o0.duration, path: ((o0.geometry && o0.geometry.coordinates) || []).map(function(c){ return { lat: c[1], lng: c[0] }; }) };
-      } catch(e){ console.warn('OSRM marşrutu alınmadı:', e && e.message); }
-    }
-    return null;
-  }
-
-  function decodePolyline(s){
-    if (!s) return [];
-    var i = 0, lat = 0, lng = 0, out = [];
-    while (i < s.length) {
-      var b, sh = 0, r = 0; do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
-      lat += (r & 1) ? ~(r >> 1) : (r >> 1);
-      sh = 0; r = 0; do { b = s.charCodeAt(i++) - 63; r |= (b & 31) << sh; sh += 5; } while (b >= 32);
-      lng += (r & 1) ? ~(r >> 1) : (r >> 1);
-      out.push({ lat: lat / 1e5, lng: lng / 1e5 });
-    }
-    return out;
-  }
-  window.BGMap = BGMap;
-
-  /* =================== Leaflet uyğun "L" obyekti =================== */
-  window.L = {
-    version: 'google-maps-adapter',
-    map: function(el, o){ return new GMap(el, o); },
-    marker: function(ll, o){ return new Marker(ll, o); },
-    divIcon: function(o){ return new DivIcon(o); },
-    icon: function(o){ return new Icon(o); },
-    polyline: function(p, o){ return new Polyline(p, o); },
-    circle: function(ll, o, r){ if (typeof o === 'number') o = { radius: o }; o = o || {}; if (r != null) o.radius = r; return new Circle(ll, o); },
-    circleMarker: function(ll, o){ o = o || {}; var c = new Circle(ll, o); c.options.radius = (o.radius || 8) * 4; return c; },
-    layerGroup: function(l){ return new LayerGroup(l); },
-    featureGroup: function(l){ return new LayerGroup(l); },
-    tileLayer: function(){ return new TileLayer(); },
-    latLng: function(a, b){ var p = toLL(a, b); return okLL(p) ? new LatLng(p.lat, p.lng) : null; },
-    latLngBounds: function(a, b){ var pts = Array.isArray(a) && b === undefined ? a : [a, b]; return boundsOf(pts.map(function(p){ return toLL(p); })); },
-    Routing: { control: function(o){ return new RoutingControl(o); } },
-    DomEvent: { disableClickPropagation: function(){}, disableScrollPropagation: function(){}, stopPropagation: function(e){ if (e && e.stopPropagation) e.stopPropagation(); } },
-    control: { zoom: function(){ return { addTo: function(){ return this; } }; }, attribution: function(){ return { addTo: function(){ return this; } }; } },
-    Map: GMap, Marker: Marker, LatLng: LatLng
-  };
-
-  /* =================== Köhnə OSM sorğularının Google-a yönləndirilməsi ===================
-     Kodda qalmış nominatim / photon / OSRM fetch çağırışları burada tutulur və eyni formatda
-     Google nəticəsi qaytarılır. Google xidməti aktiv deyilsə, son ehtiyat olaraq köhnə xidmətə gedir. */
-  function jsonResp(o){ return new Response(JSON.stringify(o), { status: 200, headers: { 'Content-Type': 'application/json' } }); }
-  function qp(url){ try { return new URL(url).searchParams; } catch(e){ return new URLSearchParams(''); } }
-  function abortable(p, signal){
-    if (!signal) return p;
-    if (signal.aborted) return Promise.reject(new DOMException('Aborted', 'AbortError'));
-    return new Promise(function(res, rej){
-      var on = function(){ rej(new DOMException('Aborted', 'AbortError')); };
-      signal.addEventListener('abort', on, { once: true });
-      p.then(function(v){ signal.removeEventListener('abort', on); res(v); }, function(e){ signal.removeEventListener('abort', on); rej(e); });
-    });
-  }
-  function toNominatim(it){
-    var disp = it.formatted || it.name || '';
-    if (it.name && disp.indexOf(it.name) !== 0) disp = it.name + ', ' + disp;
-    return { lat: String(it.lat), lon: String(it.lng), display_name: disp, name: it.name || '', address: it.address || {} };
-  }
-  function toPhoton(it){
-    var a = it.address || {};
-    return { type: 'Feature', geometry: { type: 'Point', coordinates: [it.lng, it.lat] }, properties: {
-      name: it.name || a.building || '', street: a.road || '', housenumber: a.house_number || '', district: a.suburb || a.city_district || '',
-      locality: a.neighbourhood || '', city: a.city || '', state: a.state || '', country: a.country || '', countrycode: (a.country_code || 'az').toUpperCase(),
-      osm_key: a.road && !it.name ? 'highway' : 'place' } };
-  }
-  async function handleOsm(kind, url, input, init){
-    var q = qp(url);
-    try {
-      if (kind === 'nomSearch') {
-        var lim = parseInt(q.get('limit') || '7', 10) || 7;
-        var r = await BGMap.search(q.get('q') || '', lim);
-        return jsonResp(r.map(toNominatim));
-      } else if (kind === 'photon') {
-        var r2 = await BGMap.search(q.get('q') || '', parseInt(q.get('limit') || '7', 10) || 7);
-        return jsonResp({ type: 'FeatureCollection', features: r2.map(toPhoton) });
-      } else if (kind === 'nomReverse') {
-        var rv = await BGMap.reverse(q.get('lat'), q.get('lon'));
-        if (rv) return jsonResp({ lat: String(rv.lat), lon: String(rv.lng), display_name: rv.formatted, address: rv.address });
-        return jsonResp({ error: 'Unable to geocode' });
-      } else if (kind === 'osrm') {
-        var m = url.match(/driving\/(-?[\d.]+),(-?[\d.]+);(-?[\d.]+),(-?[\d.]+)/);
-        if (m) {
-          var rt = await BGMap.route({ lat: +m[2], lng: +m[1] }, { lat: +m[4], lng: +m[3] });
-          if (rt) return jsonResp({ code: 'Ok', routes: [{ distance: rt.distance, duration: rt.duration }], waypoints: [] });
-        }
-      }
-    } catch(e){ console.warn('Google xidməti cavab vermədi, ehtiyat xidmətə keçilir:', e && e.message); }
-    /* son ehtiyat: köhnə açıq xidmət */
-    return _fetch(input, init);
-  }
-  if (_fetch) {
-    window.fetch = function(input, init){
-      var url = typeof input === 'string' ? input : (input && input.url) || String(input);
-      var kind = null;
-      if (/nominatim\.openstreetmap\.org\/search/.test(url)) kind = 'nomSearch';
-      else if (/nominatim\.openstreetmap\.org\/reverse/.test(url)) kind = 'nomReverse';
-      else if (/photon\.komoot\.io\/api/.test(url)) kind = 'photon';
-      else if (/router\.project-osrm\.org\/route\/v1\/driving/.test(url)) kind = 'osrm';
-      if (!kind) return _fetch(input, init);
-      return abortable(handleOsm(kind, url, input, init), init && init.signal);
-    };
-  }
-
-  /* =================== PREMIUM GLASS GÖRÜNÜŞ =================== */
-  try {
-    var st = document.createElement('style');
-    st.textContent = [
-      '.bg-map-premium{position:relative;overflow:hidden;isolation:isolate;box-shadow:0 18px 40px -18px rgba(20,12,0,.45),0 2px 6px rgba(0,0,0,.08);background:#ece7de}',
-      '.bg-map-premium.bg-map-dark{background:#1d2230;box-shadow:0 18px 40px -18px rgba(0,0,0,.8),0 0 0 1px rgba(212,175,55,.18)}',
-      /* şüşə qabıq: kənar parıltısı, üst işıq zolağı, yumşaq vinyet */
-      '.bg-map-glass{position:absolute;inset:0;z-index:650;pointer-events:none;border-radius:inherit;',
-      'box-shadow:inset 0 0 0 1px rgba(255,255,255,.55),inset 0 1px 0 rgba(255,255,255,.85),inset 0 0 38px rgba(40,25,0,.16);',
-      'background:linear-gradient(180deg,rgba(255,255,255,.22) 0%,rgba(255,255,255,0) 18%,rgba(255,255,255,0) 82%,rgba(40,25,0,.10) 100%),',
-      'radial-gradient(120% 80% at 50% -10%,rgba(255,255,255,.18),rgba(255,255,255,0) 60%),',
-      'radial-gradient(40% 30% at 0% 0%,rgba(255,255,255,.28),rgba(255,255,255,0) 70%),radial-gradient(35% 25% at 100% 100%,rgba(255,200,120,.16),rgba(255,255,255,0) 70%)}',
-      '.bg-map-dark .bg-map-glass{box-shadow:inset 0 0 0 1px rgba(212,175,55,.28),inset 0 1px 0 rgba(255,255,255,.18),inset 0 0 46px rgba(0,0,0,.55);',
-      'background:linear-gradient(180deg,rgba(255,255,255,.07) 0%,rgba(255,255,255,0) 16%,rgba(0,0,0,0) 80%,rgba(0,0,0,.28) 100%)}',
-      /* şüşə zoom düymələri */
-      '.bg-map-zoom{position:absolute;right:14px;bottom:30px;z-index:700;display:flex;flex-direction:column;align-items:center;border-radius:16px;overflow:hidden;',
-      'background:rgba(255,255,255,.55);-webkit-backdrop-filter:blur(16px) saturate(170%);backdrop-filter:blur(16px) saturate(170%);',
-      'border:1px solid rgba(255,255,255,.75);box-shadow:0 10px 24px -8px rgba(0,0,0,.35),inset 0 1px 0 rgba(255,255,255,.9)}',
-      '.bg-map-zoom button{all:unset;cursor:pointer;width:40px;height:38px;display:flex;align-items:center;justify-content:center;font:600 22px/1 system-ui,sans-serif;color:#2b2b2b;-webkit-tap-highlight-color:transparent;transition:background .15s}',
-      '.bg-map-zoom button:active{background:rgba(255,255,255,.6)}',
-      '.bg-map-zoom span{width:60%;height:1px;background:rgba(0,0,0,.12)}',
-      '.bg-map-dark .bg-map-zoom{background:rgba(20,22,30,.55);border-color:rgba(212,175,55,.35);box-shadow:0 10px 24px -8px rgba(0,0,0,.7),inset 0 1px 0 rgba(255,255,255,.08)}',
-      '.bg-map-dark .bg-map-zoom button{color:#e9d9a6}.bg-map-dark .bg-map-zoom span{background:rgba(212,175,55,.25)}',
-      /* şüşə popup — Google */
-      '.bg-map-premium .gm-style .gm-style-iw-c{border-radius:16px!important;padding:12px 14px!important;background:rgba(255,255,255,.78)!important;',
-      '-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%);border:1px solid rgba(255,255,255,.8);box-shadow:0 16px 36px -12px rgba(0,0,0,.45)!important}',
-      '.bg-map-premium .gm-style .gm-style-iw-d{overflow:auto!important;font:13px/1.45 system-ui,sans-serif;color:#1f1f1f}',
-      '.bg-map-premium .gm-style .gm-style-iw-tc::after{background:rgba(255,255,255,.78)!important}',
-      '.bg-map-premium .gm-style .gm-style-iw-chr button{opacity:.6}',
-      '.bg-map-dark .gm-style .gm-style-iw-c{background:rgba(22,24,32,.82)!important;border-color:rgba(212,175,55,.35)}',
-      '.bg-map-dark .gm-style .gm-style-iw-d{color:#f1e6c8}.bg-map-dark .gm-style .gm-style-iw-tc::after{background:rgba(22,24,32,.82)!important}',
-      /* şüşə popup — ehtiyat xəritə */
-      '.bg-map-premium .leaflet-popup-content-wrapper{border-radius:16px;background:rgba(255,255,255,.78);-webkit-backdrop-filter:blur(18px) saturate(170%);backdrop-filter:blur(18px) saturate(170%);border:1px solid rgba(255,255,255,.8);box-shadow:0 16px 36px -12px rgba(0,0,0,.45)}',
-      '.bg-map-premium .leaflet-popup-tip{background:rgba(255,255,255,.78)}',
-      '.bg-map-dark .leaflet-popup-content-wrapper,.bg-map-dark .leaflet-popup-tip{background:rgba(22,24,32,.85);color:#f1e6c8;border-color:rgba(212,175,55,.35)}',
-      /* buzlu şüşə çərçivə */
-      '.bg-map-bezel{position:absolute;inset:0;z-index:640;pointer-events:none;border-radius:inherit;padding:7px;',
-      'background:linear-gradient(135deg,rgba(255,255,255,.55),rgba(255,255,255,.12) 40%,rgba(255,255,255,.05) 60%,rgba(255,255,255,.4));',
-      '-webkit-backdrop-filter:blur(9px) saturate(180%);backdrop-filter:blur(9px) saturate(180%);',
-      '-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0)}',
-      '.bg-map-full .bg-map-bezel{padding:4px}',
-      '.bg-map-dark .bg-map-bezel{background:linear-gradient(135deg,rgba(212,175,55,.32),rgba(255,255,255,.04) 40%,rgba(0,0,0,.05) 60%,rgba(212,175,55,.22))}',
-      /* animasiyalı qızılı haşiyə */
-      '@property --bgA{syntax:"<angle>";inherits:false;initial-value:0deg}',
-      '.bg-map-border{position:absolute;inset:0;z-index:660;pointer-events:none;border-radius:inherit;padding:1.6px;',
-      'background:conic-gradient(from var(--bgA),#ffe2a0,#ff9a3c,#fff6dc,#ff5722,#ffd27a,#fff6dc,#ffe2a0);',
-      '-webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask:linear-gradient(#000 0 0) content-box exclude,linear-gradient(#000 0 0);',
-      'animation:bgSpin 9s linear infinite;opacity:.9}',
-      '.bg-map-dark .bg-map-border{background:conic-gradient(from var(--bgA),#d4af37,#7a5c12,#fff1b8,#b8860b,#d4af37,#3a2c08,#d4af37)}',
-      '@keyframes bgSpin{to{--bgA:360deg}}',
-      /* üstündən keçən işıq parıltısı */
-      '.bg-map-sheen{position:absolute;top:-60%;left:-70%;width:38%;height:220%;z-index:655;pointer-events:none;transform:rotate(14deg);',
-      'background:linear-gradient(90deg,rgba(255,255,255,0),rgba(255,255,255,.22) 45%,rgba(255,255,255,.32) 50%,rgba(255,255,255,.22) 55%,rgba(255,255,255,0));',
-      'animation:bgSheen 8s cubic-bezier(.45,0,.2,1) infinite;mix-blend-mode:soft-light}',
-      '.bg-map-dark .bg-map-sheen{background:linear-gradient(90deg,rgba(255,226,140,0),rgba(255,226,140,.12) 50%,rgba(255,226,140,0));mix-blend-mode:screen}',
-      '@keyframes bgSheen{0%,62%{left:-70%}100%{left:150%}}',
-      /* yüklənmə */
-      '.bg-map-loader{position:absolute;inset:0;z-index:680;display:flex;align-items:center;justify-content:center;pointer-events:none;border-radius:inherit;',
-      'background:linear-gradient(110deg,#efe9df 30%,#fbf8f2 50%,#efe9df 70%);background-size:250% 100%;animation:bgSkel 1.3s linear infinite;transition:opacity .55s ease}',
-      '.bg-map-dark .bg-map-loader{background:linear-gradient(110deg,#171a24 30%,#242836 50%,#171a24 70%);background-size:250% 100%}',
-      '.bg-map-loader.done{opacity:0}',
-      '.bg-map-loader-ring{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,122,0,.18);border-top-color:#ff7a00;animation:bgRot .8s linear infinite}',
-      '.bg-map-dark .bg-map-loader-ring{border-color:rgba(212,175,55,.2);border-top-color:#d4af37}',
-      '@keyframes bgSkel{to{background-position:-150% 0}}@keyframes bgRot{to{transform:rotate(360deg)}}',
-      /* canlı nişan */
-      '.bg-map-badge{position:absolute;left:12px;top:12px;z-index:700;pointer-events:none;display:flex;align-items:center;gap:7px;padding:6px 11px 6px 9px;border-radius:999px;',
-      'font:600 11.5px/1 system-ui,sans-serif;color:#2a2116;letter-spacing:.2px;background:rgba(255,255,255,.58);',
-      '-webkit-backdrop-filter:blur(14px) saturate(170%);backdrop-filter:blur(14px) saturate(170%);border:1px solid rgba(255,255,255,.8);box-shadow:0 8px 20px -8px rgba(0,0,0,.35),inset 0 1px 0 #fff}',
-      '.bg-map-badge b{font-weight:800;background:linear-gradient(90deg,#ff5722,#ff9a3c);-webkit-background-clip:text;background-clip:text;color:transparent}',
-      '.bg-map-badge span{opacity:.65;font-weight:600}',
-      '.bg-map-badge i{width:8px;height:8px;border-radius:50%;background:#22c55e;box-shadow:0 0 0 0 rgba(34,197,94,.6);animation:bgPulse 1.8s infinite}',
-      '.bg-map-dark .bg-map-badge{background:rgba(20,22,30,.6);color:#f1e6c8;border-color:rgba(212,175,55,.35);box-shadow:0 8px 20px -8px rgba(0,0,0,.7)}',
-      '.bg-map-dark .bg-map-badge b{background:linear-gradient(90deg,#d4af37,#fff1b8);-webkit-background-clip:text;background-clip:text}',
-      '@keyframes bgPulse{0%{box-shadow:0 0 0 0 rgba(34,197,94,.6)}70%{box-shadow:0 0 0 9px rgba(34,197,94,0)}100%{box-shadow:0 0 0 0 rgba(34,197,94,0)}}',
-      /* mənim yerim düyməsi + nöqtə */
-      '.bg-map-zoom .bg-loc{color:#ff5722}.bg-map-dark .bg-map-zoom .bg-loc{color:#d4af37}',
-      '.bg-map-zoom .bg-loc.busy svg{animation:bgRot 1s linear infinite}.bg-map-zoom .bg-loc.err{color:#e11d48}',
-      '.bg-me-dot{width:22px;height:22px;border-radius:50%;background:rgba(37,99,235,.18);display:flex;align-items:center;justify-content:center;animation:bgMe 2s ease-out infinite}',
-      '.bg-me-dot i{width:12px;height:12px;border-radius:50%;background:#2563eb;border:2.5px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35)}',
-      '@keyframes bgMe{0%{box-shadow:0 0 0 0 rgba(37,99,235,.45)}80%{box-shadow:0 0 0 16px rgba(37,99,235,0)}100%{box-shadow:0 0 0 0 rgba(37,99,235,0)}}',
-      '@media (prefers-reduced-motion:reduce){.bg-map-border,.bg-map-sheen,.bg-map-loader,.bg-map-badge i,.bg-me-dot{animation:none!important}}',
-      '.bg-lf-light{filter:saturate(.82) contrast(1.04) brightness(1.03)}',
-      '.bg-lf-dark{filter:invert(1) hue-rotate(180deg) brightness(.95) contrast(.9)}',
-      '.bg-lf-divicon{background:none;border:0}',
-      '.bg-gm-divicon{box-sizing:border-box;line-height:normal}.bg-gm-divicon *{box-sizing:border-box}'
-    ].join('');
-    (document.head || document.documentElement).appendChild(st);
-  } catch(e){}
+  var s = document.createElement('script');
+  s.async = true;
+  s.src = 'https://maps.googleapis.com/maps/api/js?key=' + GMAPS_KEY + '&callback=__gmReady&loading=async&language=az&region=AZ&v=weekly';
+  s.onerror = function(){ console.error('Google Maps yüklənmədi (internet?)'); };
+  document.head.appendChild(s);
 })();
-
 </script>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>BakuGo Ultimate</title>
     <style>
 *{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',sans-serif;}
 
@@ -1236,8 +466,6 @@ box-shadow: inset 0 0 0 1px rgba(212,175,55,0.25);
         radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,0.16) 100%),
         linear-gradient(180deg, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0) 12%, rgba(0,0,0,0) 85%, rgba(0,0,0,0.14) 100%);
 }
-.leaflet-routing-container{ display:none !important; }
-.osm-dark-tiles{ filter: invert(1) hue-rotate(180deg) brightness(.95) contrast(.9); }
 
 .switch{position:absolute;bottom:20px;width:90%;left:5%;height:60px;background:linear-gradient(160deg,#141414,#0a0a0a);border-radius:40px;display:flex;align-items:center;padding:5px;cursor:pointer;border:1px solid rgba(212,175,55,0.25);box-shadow:0 10px 30px rgba(0,0,0,0.5), inset 0 0 15px rgba(212,175,55,0.06);z-index:10;}
 
@@ -2186,21 +1414,6 @@ body.light-mode .toast{
   border-color: rgba(255,122,0,0.5);
 }
     </style>
-<!-- PWA (PWABuilder üçün) -->
-<link rel="manifest" href="kuryer-manifest.json">
-<meta name="theme-color" content="#0d0d0d">
-<meta name="application-name" content="BG Kuryer">
-<meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="BG Kuryer">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="description" content="BakuGo kuryerləri üçün: yeni sifarişlər, marşrut, qazanc və canlı naviqasiya.">
-<link rel="icon" type="image/png" sizes="32x32" href="icons/kuryer-favicon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/kuryer-192.png">
-<link rel="apple-touch-icon" href="icons/kuryer-apple.png">
-<script>/* Service Worker: oflayn iş + push (Firebase-dən asılı olmadan qeydiyyat) */
-if ('serviceWorker' in navigator) { window.addEventListener('load', function () { navigator.serviceWorker.register('kuryer-sw.js', { scope: './kuryer.html' }).catch(function (e) { console.warn('Service Worker:', e); }); }); }
-</script>
 </head>
 <body ontouchstart="handleTouchStart(event)" ontouchmove="handleTouchMove(event)">
 
@@ -2236,7 +1449,7 @@ document.addEventListener('DOMContentLoaded', function(){
 </script>
 
 <script>
-/* SPLASH TƏHLÜKƏSİZLİK ŞƏBƏKƏSİ — heç bir xarici CDN-dən (Leaflet/Firebase) asılı deyil.
+/* SPLASH TƏHLÜKƏSİZLİK ŞƏBƏKƏSİ — heç bir xarici CDN-dən (Google Maps/Firebase) asılı deyil.
    Bu skript səhifənin lap əvvəlində, hər şeydən əvvəl işə düşür ki, xarici skriptlərdən
    biri yüklənməsə/xəta versə belə, istifadəçi qara "BAKUGO" ekranında ilişib qalmasın. */
 window.addEventListener('error', function(e){
@@ -2529,7 +1742,7 @@ GPS AKTİV
 <h3 style="color:#d4af37;letter-spacing:0.5px;">🧭 Naviqasiya</h3>
 <p style="opacity:0.55;font-size:12.5px;margin-top:4px;line-height:1.5;">Seçdiyin provayder tətbiqdəki xəritənin görünüşünü dəyişir və aktiv sifariş zamanı marşrut həmin provayderlə açılır.</p>
 
-<div class="nav-provider-card" id="navCard-osm" onclick="setMap('osm')">
+<div class="nav-provider-card" id="navCard-google" onclick="setMap('google')">
     <div class="btn-icon blue">🗺</div>
     <div style="flex:1;">
         <div class="nav-provider-title">Google Maps</div>
@@ -2561,7 +1774,7 @@ GPS AKTİV
 
 <div id="privacyModal" class="modal" style="text-align:left;">
 <h3>🔐 Gizlilik Siyasəti</h3>
-<p style="opacity:0.6;font-size:12px;">Son yenilənmə: 08.08.2026</p>
+<p style="opacity:0.6;font-size:12px;">Son yenilənmə: 08.11.2026</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">1. Ümumi müddəalar</h4>
 <p>BakuGo ("Tətbiq", "biz") kuryerlik xidməti göstərən istifadəçilərin ("Kuryer", "siz") şəxsi məlumatlarının qorunmasına önəm verir. Bu sənəd hansı məlumatların toplandığını, necə istifadə olunduğunu və hüquqlarınızı izah edir. Tətbiqdən istifadə etməklə bu siyasətlə razılaşmış olursunuz.</p>
@@ -2577,10 +1790,10 @@ GPS AKTİV
 <p>Məlumatlar yalnız aşağıdakı məqsədlər üçün istifadə olunur: sifarişlərin təyin edilməsi və izlənməsi, ödəniş və balans hesablamaları, dəstək xidməti göstərilməsi, tətbiqin təhlükəsizliyinin təmin edilməsi və qanuni tələblərə cavab verilməsi. Məlumatlarınız satılmır və ya reklam məqsədilə üçüncü tərəflərə ötürülmür.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">4. Məlumatların paylaşılması</h4>
-<p>Məlumatlarınız yalnız xidmətin işləməsi üçün zəruri olan aşağıdakı tərəflərlə paylaşılır: Google Firebase (məlumatların təhlükəsiz saxlanması və autentifikasiya), naviqasiya xidmətləri (OSM, Waze, Yandex — yalnız marşrut qurmaq üçün, sizin adınız ötürülmür), lisenziyalı ödəniş provayderləri (real pul köçürmələri həyata keçirildikdə) və qanunla tələb olunduğu halda müvafiq dövlət qurumları.</p>
+<p>Məlumatlarınız yalnız xidmətin işləməsi üçün zəruri olan aşağıdakı tərəflərlə paylaşılır: Google Firebase (məlumatların təhlükəsiz saxlanması və autentifikasiya), xəritə və naviqasiya xidmətləri (Google Maps, Waze, Yandex — yalnız xəritəni göstərmək və marşrut qurmaq üçün, sizin adınız ötürülmür), lisenziyalı ödəniş provayderləri (real pul köçürmələri həyata keçirildikdə) və qanunla tələb olunduğu halda müvafiq dövlət qurumları.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">5. Lokasiya icazəsi</h4>
-<p>GPS lokasiyası yalnız tətbiq aktiv (ön planda) istifadə olunarkən toplanır və aktiv sifariş olduqda restoran/müştəriyə marşrut göstərmək üçün istifadə edilir. Lokasiya icazəsini istənilən vaxt telefonunuzun tənzimləmələrindən ləğv edə bilərsiniz, bu halda naviqasiya funksiyaları məhdudlaşacaq.</p>
+<p>GPS lokasiyası yalnız siz ONLINE rejimdə olduğunuz və tətbiq açıq (ön planda) olduğu müddətdə toplanır, arxa fonda toplanmır. Lokasiya restoran/müştəriyə marşrut göstərmək və aktiv sifarişin müştəri tərəfindən canlı izlənməsi üçün istifadə edilir. Lokasiya icazəsini istənilən vaxt telefonunuzun tənzimləmələrindən ləğv edə bilərsiniz, bu halda naviqasiya funksiyaları məhdudlaşacaq.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">6. Saxlanma müddəti</h4>
 <p>Hesab və sifariş məlumatları hesabınız aktiv olduğu müddətdə saxlanılır. Hesabın silinməsi tələb olunduqda, qanuni saxlama öhdəlikləri (məs. maliyyə hesabatlığı) istisna olmaqla, məlumatlar 30 gün ərzində silinir.</p>
@@ -2589,7 +1802,7 @@ GPS AKTİV
 <p>Məlumatlarınız şifrələnmiş bağlantılar (HTTPS) və giriş nəzarətli baza (Firebase Security Rules) vasitəsilə qorunur. Ödəniş kartı məlumatları PCI-DSS standartlarına uyğun olaraq tam formada heç vaxt saxlanılmır.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">8. Hüquqlarınız</h4>
-<p>İstənilən vaxt aşağıdakı hüquqlardan istifadə edə bilərsiniz: məlumatlarınıza giriş tələb etmək, onları düzəltmək, hesabınızı və məlumatlarınızı silmək tələbi vermək. Bu tələblər üçün "Dəstək" bölməsi vasitəsilə bizimlə əlaqə saxlaya bilərsiniz.</p>
+<p>İstənilən vaxt aşağıdakı hüquqlardan istifadə edə bilərsiniz: məlumatlarınıza giriş tələb etmək, onları düzəltmək, hesabınızı və məlumatlarınızı silmək. Hesabı tətbiqdə Hesab → "Hesabı sil" bölməsindən dərhal silə və ya <a href="delete-account.html" style="color:#4fc3ff;">hesabın silinməsi səhifəsindən</a> sorğu göndərə bilərsiniz. Siyasətin veb versiyası: <a href="privacy-policy.html" style="color:#4fc3ff;">privacy-policy.html</a>.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">9. Yaş məhdudiyyəti</h4>
 <p>Tətbiq 18 yaşdan yuxarı şəxslər üçün nəzərdə tutulub. Bilərəkdən yetkinlik yaşına çatmayan şəxslərdən məlumat toplamırıq.</p>
@@ -2620,7 +1833,7 @@ GPS AKTİV
 <p>Kuryer BakuGo-nun işçisi deyil, müstəqil podratçı statusunda fəaliyyət göstərir. Sifarişləri vaxtında, ehtiyatla və qanunla müəyyən edilmiş yol hərəkəti qaydalarına uyğun çatdırmaq kuryerin öhdəliyidir. Nəqliyyat vasitəsinin sığortası və qanuni idarəetmə hüququ kuryerin öz məsuliyyətindədir.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">5. Ödəniş və komissiya</h4>
-<p>Hər çatdırılan sifariş üçün qazanc tətbiqdə göstərilən tarifə əsasən hesablanır və kuryerin balansına əlavə olunur. Balansın çıxarılması tələbi göndərildikdə, ödəniş göstərilən bank hesabı/kart məlumatına uyğun olaraq [X iş günü] ərzində həyata keçirilir. Yanlış hesab məlumatı verilməsindən yaranan gecikmələrə görə platforma məsuliyyət daşımır.</p>
+<p>Hər çatdırılan sifariş üçün qazanc tətbiqdə göstərilən tarifə əsasən hesablanır və kuryerin balansına əlavə olunur. Balansın çıxarılması tələbi göndərildikdə, ödəniş göstərilən bank hesabı/kart məlumatına uyğun olaraq admin təsdiqindən sonra 3 iş günü ərzində həyata keçirilir. Yanlış hesab məlumatı verilməsindən yaranan gecikmələrə görə platforma məsuliyyət daşımır.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">6. Məsuliyyətin məhdudlaşdırılması</h4>
 <p>BakuGo texniki nasazlıqlar, internet kəsilmələri və ya üçüncü tərəf xidmətlərinin (naviqasiya, ödəniş provayderi) fasilələrindən yaranan gecikmələrə görə məsuliyyət daşımır. Platforma xidməti "olduğu kimi" təqdim edir.</p>
@@ -2629,7 +1842,7 @@ GPS AKTİV
 <p>Saxta sifariş yaratmaq, başqasının hesabından istifadə etmək, tətbiqin təhlükəsizlik sistemini pozmağa cəhd etmək və digər istifadəçilərə qarşı təhqiredici davranış qadağandır. Bu qaydaların pozulması hesabın dərhal bağlanmasına səbəb ola bilər.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">8. Hesabın dayandırılması və ləğvi</h4>
-<p>Qaydaların pozulması halında hesabınız xəbərdarlıq edilmədən dayandırıla bilər. Hesabınızı istənilən vaxt "Hesabdan çıxış" və dəstəklə əlaqə saxlayaraq silə bilərsiniz.</p>
+<p>Qaydaların pozulması halında hesabınız xəbərdarlıq edilmədən dayandırıla bilər. Hesabınızı istənilən vaxt tətbiqdə Hesab → "Hesabı sil" bölməsindən və ya <a href="delete-account.html" style="color:#4fc3ff;">hesabın silinməsi səhifəsi</a> vasitəsilə silə bilərsiniz.</p>
 
 <h4 style="color:#d4af37;margin-top:16px;">9. Mübahisələrin həlli</h4>
 <p>Tərəflər arasında yaranan mübahisələr ilk növbədə danışıqlar yolu ilə, mümkün olmadıqda isə Azərbaycan Respublikasının qanunvericiliyinə uyğun məhkəmə qaydasında həll edilir.</p>
@@ -2697,27 +1910,24 @@ GPS AKTİV
 <div class="card3d" id="card3d">
 <div class="card-face front">
 <div class="card-top">
-<div class="bank" id="bankName">BAKUGO BANK</div>
+<div class="bank" id="bankName">BAKUGO</div>
 <div class="visaLogo" id="cardType">💳</div>
 </div>
 <div class="chip"></div>
 <div class="card-number" id="cardPreview">**** **** **** 0000</div>
 <div class="card-bottom">
 <div><span>Kart sahibi</span><h4 id="namePreview">AD SOYAD</h4></div>
-<div><span>Bitmə tarixi</span><h4 id="datePreview">MM/YY</h4></div>
+<div><span>Məqsəd</span><h4>Qazanc ödənişi</h4></div>
 </div>
 </div>
 <div class="card-face back">
 <div class="blackLine"></div>
-<div class="cvvBox">CVV:<span id="cvvPreview">***</span></div>
+<div class="cvvBox" style="text-align:center;">Yalnız son 4 rəqəm saxlanılır</div>
 </div>
 </div>
 <input id="cardNumber" maxlength="19" placeholder="Kart nömrəsi">
 <input id="cardName" placeholder="Ad Soyad">
-<div class="card-row">
-<input id="cardDate" maxlength="5" placeholder="MM/YY">
-<input id="cardCVV" maxlength="3" placeholder="CVV" onfocus="flipCard(true)" onblur="flipCard(false)">
-</div>
+<p style="font-size:12px;opacity:0.6;margin-top:10px;line-height:1.5;">Kart yalnız qazancınızın sizə köçürülməsi üçün istifadə olunur. Bitmə tarixi və CVV kodu heç vaxt soruşulmur və saxlanılmır.</p>
 <div class="premiumBtn" onclick="confirmCard()">💳 Təsdiqlə</div>
 <div class="balanceBox">💰 Balans:<span id="balance">0.00</span> AZN</div>
 <div class="close" onclick="closeModal('cardModal')">Bağla</div>
@@ -2782,7 +1992,7 @@ GPS AKTİV
 
 <div class="faq-item" onclick="this.classList.toggle('open')">
   <div class="faq-q"><span>Naviqasiya provayderini necə dəyişirəm?</span><span class="faq-arrow">▾</span></div>
-  <div class="faq-a">Hesab → Naviqasiya bölməsindən OSM, Waze və ya Yandex arasından seçim edə bilərsən. Seçim həm tətbiqdəki xəritənin görünüşünü, həm də sifariş marşrutunu dəyişir.</div>
+  <div class="faq-a">Hesab → Naviqasiya bölməsindən Google Maps, Waze və ya Yandex arasından seçim edə bilərsən. Seçim həm tətbiqdəki xəritənin görünüşünü, həm də sifariş marşrutunu dəyişir.</div>
 </div>
 
 <div class="faq-item" onclick="this.classList.toggle('open')">
@@ -2812,7 +2022,7 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
 <div style="margin-top:16px;display:flex;flex-direction:column;gap:8px;font-size:12.5px;opacity:0.6;">
   <div style="display:flex;justify-content:space-between;"><span>Platforma</span><span>Firebase</span></div>
   <div style="display:flex;justify-content:space-between;"><span>Xəritə mühərriki</span><span>Google Maps</span></div>
-  <div style="display:flex;justify-content:space-between;"><span>Son yenilənmə</span><span>08.08.2026</span></div>
+  <div style="display:flex;justify-content:space-between;"><span>Son yenilənmə</span><span>08.11.2026</span></div>
 </div>
 
 <div style="margin-top:18px;font-size:11.5px;opacity:0.4;text-align:center;">© 2026 BakuGo. Bütün hüquqlar qorunur.</div>
@@ -2862,7 +2072,7 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
   window.onSnapshot = onSnapshot;
   window.limit = limit;
 
-  /* Real yol məsafəsi + vaxtı (OSRM). Şəbəkə zəif olsa belə HEÇ VAXT quş-baxışına (düz xətt) keçmir —
+  /* Real yol məsafəsi + vaxtı (əvvəl Google Directions, alınmasa OSRM). Şəbəkə zəif olsa belə HEÇ VAXT quş-baxışına (düz xətt) keçmir —
      internet qayıdana/OSRM cavab verənə qədər səssizcə yenidən cəhd edir. onRetry(cəhdSayı) ilə UI-a
      "yenidən cəhd olunur" statusu ötürülə bilər. */
   window.getRealRouteInfo = async (lat1, lng1, lat2, lng2, onRetry) => {
@@ -2871,6 +2081,14 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
     while (true) {
         attempt++;
         try {
+            if (window.__bakugoRoute && !window.__gmDirDisabled) {
+                try {
+                    const g = await window.__bakugoRoute({ lat: +lat1, lng: +lng1 }, { lat: +lat2, lng: +lng2 });
+                    if (g && g.meters >= 0) {
+                        return { km: parseFloat((g.meters / 1000).toFixed(1)), minutes: Math.max(1, Math.round(g.seconds / 60)) };
+                    }
+                } catch (ge) { /* aşağıda OSRM ilə davam edir */ }
+            }
             if (!navigator.onLine) {
                 await new Promise((resolve) => {
                     const handler = () => { window.removeEventListener('online', handler); resolve(); };
@@ -3037,9 +2255,45 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
      Bildiriş icazəsi istəyir, token alır və couriers/{uid} sənədinə "fcmToken"
      sahəsi kimi yazır. Cloud Function (functions/indexkuryer10.js) yeni sifariş
      yaranan kimi bu tokenə push göndərir — tətbiq bağlı olsa belə bildiriş gəlir. */
-  const VAPID_KEY = "BURAYA_FIREBASE_CONSOLE_VAPID_KEY_YAZIN";
+  /* Firebase Console → Project settings → Cloud Messaging → Web Push certificates → "Key pair".
+     Boş qalsa, Firebase-in standart açarı işlədilir və push yenə işləyir. */
+  const VAPID_KEY = "";
 
-  window.initPush = async () => { /* push: aşağıdakı BGPush modulu (sw.js + FCM) */ if (window.BGPush) return window.BGPush.enable(); };
+  window.initPush = async () => {
+    try {
+      const supported = await isSupported().catch(() => false);
+      if (!supported) { console.warn("Bu brauzer/mühit push-u dəstəkləmir."); return; }
+      if (!window.auth.currentUser) return;
+
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") { console.warn("Bildiriş icazəsi verilmədi."); return; }
+
+      const registration = (await (window.__swReady || Promise.resolve(null)))
+                          || await navigator.serviceWorker.register("./sw.js", { scope: "./" });
+      await navigator.serviceWorker.ready;
+      const messaging = getMessaging(app);
+      const tokenOpts = { serviceWorkerRegistration: registration };
+      if (VAPID_KEY && VAPID_KEY.length > 40) tokenOpts.vapidKey = VAPID_KEY;
+      const token = await getToken(messaging, tokenOpts);
+
+      if (token) {
+        await setDoc(doc(db, "couriers", window.auth.currentUser.uid), { fcmToken: token }, { merge: true });
+        console.log("✅ Push token qeydə alındı");
+      }
+
+      // Tətbiq açıq olanda (foreground) gələn bildirişlər
+      onMessage(messaging, (payload) => {
+        console.log("📩 Foreground push:", payload);
+        const audio = document.getElementById('notifSound');
+        if (audio) audio.play().catch(() => {});
+        if (typeof toast === 'function') {
+          toast('🔔 ' + (payload.notification?.title || 'Yeni sifariş gəldi!'));
+        }
+      });
+    } catch (e) {
+      console.error("Push init xətası:", e);
+    }
+  };
 
   /* ---- CİHAZ İZİ (İMEİ ƏVƏZEDİCİSİ) ----
      VACİB: brauzerdə/PWA-da HEÇ BİR JavaScript API real İMEİ-yə giriş vermir (bu, həm
@@ -3681,49 +2935,28 @@ BakuGo — Azərbaycanda sürətli və etibarlı çatdırılma platformasıdır.
 </script>
 
 <script>
-if (typeof L === 'undefined') {
-    console.error('❌ Leaflet kitabxanası yüklənmədi (Leaflet CDN-ə çatılmadı). Xəritə və kuryer izləmə işləməyəcək, amma splash ekranı 4 saniyə sonra avtomatik bağlanacaq.');
-}
-let map = L.map('map', { zoomControl: false }).setView([40.4093, 49.8671], 13);
-/* Xəritə gizli/yeni açılan konteynerdə boz qalmasın + Leaflet CSS CDN-dən gəlməsə də düzgün qurulsun */
-(function(){
-  if (!document.getElementById('bakugo-leaflet-essential')) {
-    var st = document.createElement('style'); st.id = 'bakugo-leaflet-essential';
-    st.textContent = '.leaflet-pane,.leaflet-tile,.leaflet-marker-icon,.leaflet-marker-shadow,.leaflet-tile-container,.leaflet-pane>svg,.leaflet-pane>canvas,.leaflet-layer{position:absolute;left:0;top:0}.leaflet-container{overflow:hidden}.leaflet-container img.leaflet-tile{max-width:none!important;max-height:none!important;width:256px;height:256px}.leaflet-container img.leaflet-marker-icon{max-width:none!important}.leaflet-pane{z-index:400}.leaflet-tile-pane{z-index:200}.leaflet-marker-pane{z-index:600}.leaflet-popup-pane{z-index:700}';
-    document.head.appendChild(st);
-  }
-  try { if (window.ResizeObserver) new ResizeObserver(function(){ try{ map.invalidateSize(); }catch(e){} }).observe(map.getContainer()); } catch(e){}
-  [300, 1200, 3000].forEach(function(t){ setTimeout(function(){ try{ map.invalidateSize(); }catch(e){} }, t); });
-})();
+let map = L.map('map').setView([40.4093, 49.8671], 13);
 
-/* ===== PREMİUM NAVİQASİYA PROVAYDERİ — xəritə teması seçilmiş provayderə VƏ tətbiqin
-   gecə/gündüz (light/dark) rejiminə görə dəyişir ===== */
-/* Xəritə: Google Maps (yuxarıdakı BGMap adapteri) */
+/* Naviqasiya provayderi: tətbiqdaxili xəritə HƏMİŞƏ Google Maps-dır.
+   Seçim yalnız xəritə görünüşünü (adi / peyk) və "Naviqasiyanı aç" düyməsinin hansı tətbiqi açdığını dəyişir. */
+window.navProvider = localStorage.getItem('bakugoNavProvider') || 'google';
+if (window.navProvider === 'osm') { window.navProvider = 'google'; try { localStorage.setItem('bakugoNavProvider', 'google'); } catch(e){} }
 
-
-
-window.navProvider = localStorage.getItem('bakugoNavProvider') || 'osm';
-let currentTileLayer = null;
-
-/* Cari rejimi (işıqlı/qara) body class-ından oxuyur ki, xəritə tam olaraq tətbiqin
-   temasına uyğun qalsın — istifadəçi manual dəyişsə də, avtomatik gecə/gündüz olsa da. */
 function currentMapMode(){
     return document.body.classList.contains('light-mode') ? 'light' : 'dark';
 }
 
 function applyMapTileStyle(provider){
-    /* Google Maps: tətbiqin gecə/gündüz rejiminə uyğun stil; 'yandex' seçimində peyk (hybrid) görünüşü */
-    if (!map || typeof map.setGoogleStyle !== 'function') return;
-    map.setGoogleStyle({ dark: currentMapMode() === 'dark', satellite: provider === 'yandex' });
+    const type = provider === 'yandex' ? 'hybrid' : 'roadmap';
+    map.setLook(type, currentMapMode() === 'dark');
 }
 
-/* Tema (işıqlı/qara) dəyişəndə xəritə də ANINDA yeni temaya uyğunlaşsın */
 window.refreshMapThemeStyle = function(){
     if (typeof map !== 'undefined' && map) applyMapTileStyle(window.navProvider);
 };
 
 function updateNavProviderUI(provider){
-    ['osm','waze','yandex'].forEach(p => {
+    ['google','waze','yandex'].forEach(p => {
         const el = document.getElementById('navCard-' + p);
         if(el) el.classList.toggle('active', p === provider);
     });
@@ -3731,10 +2964,6 @@ function updateNavProviderUI(provider){
 
 applyMapTileStyle(window.navProvider);
 updateNavProviderUI(window.navProvider);
-/* Xəritə konteyneri tam ölçülənəndən sonra Leaflet-ə ölçünü yenidən hesablat (boş/bölünmüş xəritənin qarşısı) */
-window.addEventListener('load', () => setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, 300));
-window.addEventListener('resize', () => { try { map.invalidateSize(); } catch(e){} });
-setTimeout(() => { try { map.invalidateSize(); } catch(e){} }, 1200);
 
 let restaurantMarker = null;
 let customerMarker = null;
@@ -3901,11 +3130,11 @@ function hideWazeBtn() {
 function openWazeNav() {
     const t = window.wazeTarget;
     if (!t) return;
-    const provider = window.navProvider || 'osm';
+    const provider = window.navProvider || 'google';
     if(provider === 'yandex') {
         window.open(`https://yandex.com/maps/?rtext=~${t.lat},${t.lng}&rtt=auto`, '_blank');
-    } else if(provider === 'osm') {
-        window.open(window.BGMap.navUrl(t.lat, t.lng), '_blank');
+    } else if(provider === 'google') {
+        window.open(`https://www.google.com/maps/dir/?api=1&destination=${t.lat},${t.lng}&travelmode=driving&dir_action=navigate`, '_blank');
     } else {
         window.open(`https://www.waze.com/ul?ll=${t.lat},${t.lng}&navigate=yes`, '_blank');
     }
@@ -4268,7 +3497,7 @@ window.navProvider = t;
 localStorage.setItem('bakugoNavProvider', t);
 applyMapTileStyle(t);
 updateNavProviderUI(t);
-if(t==='osm') { toast('🗺 Google Maps seçildi — marşrutlar Google Maps ilə açılacaq'); }
+if(t==='google') { toast('🗺 Google Maps seçildi — marşrutlar Google Maps ilə açılacaq'); }
 else if(t==='waze') { toast('🧭 Waze seçildi — marşrutlar Waze ilə açılacaq'); }
 else if(t==='yandex') { toast('📍 Yandex seçildi — marşrutlar Yandex ilə açılacaq'); }
 closeModal('navModal');
@@ -4715,10 +3944,7 @@ function maskCardNumber(raw){
 async function confirmCard(){
     const cardNumRaw = document.getElementById('cardNumber').value.trim();
     const cardHolder = document.getElementById('cardName').value.trim();
-    const cardDate = document.getElementById('cardDate').value.trim();
-    const cardCVV = document.getElementById('cardCVV') ? document.getElementById('cardCVV').value.trim() : '';
-
-    if(!cardNumRaw || !cardHolder || !cardDate){ toast('Zəhmət olmasa bütün xanaları doldurun.'); return; }
+    if(!cardNumRaw || !cardHolder){ toast('Zəhmət olmasa bütün xanaları doldurun.'); return; }
 
     const last4 = maskCardNumber(cardNumRaw);
     if(!last4){ toast('Kart nömrəsi düzgün deyil.'); return; }
@@ -4736,9 +3962,7 @@ async function confirmCard(){
 
     // Həssas sahələri dərhal formadan və yaddaşdan təmizləyirik
     document.getElementById('cardNumber').value = '';
-    document.getElementById('cardDate').value = '';
-    if(document.getElementById('cardCVV')) document.getElementById('cardCVV').value = '';
-    void cardCVV; // CVV heç bir yerə yazılmır, dərhal atılır
+    document.getElementById('cardPreview').innerText = '**** **** **** ' + last4;
 
     closeModal('cardModal');
 }
@@ -4753,180 +3977,5 @@ let info=document.getElementById('gpsInfo'); info.classList.add('active'); setTi
 </script>
    
 <audio id="notifSound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3" preload="auto"></audio>
-<!-- PWA + Push bildirişləri -->
-<script type="module">
-/* =====================================================================
-   BakuGo — PWA + PUSH modulu (Kuryer)
-   • Service Worker-i qeydiyyatdan keçirir (oflayn iş, quraşdırma)
-   • Giriş edən istifadəçidən bildiriş icazəsi istəyir (şüşə panel ilə)
-   • FCM tokenini Firestore-da couriers/{uid} sənədinə yazır: fcmToken + fcmTokens[]
-   • Açıq tətbiqdə gələn push üçün səs + bildiriş paneli göstərir
-   • "Tətbiqi quraşdır" təklifi (Android / kompüter)
-   Bildirişləri göndərən server hissəsi: functions/index.js (Cloud Functions)
-   ===================================================================== */
-import { getApps } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-app.js";
-import { getAuth, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-auth.js";
-import { getFirestore, doc, updateDoc, arrayUnion, serverTimestamp } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-firestore.js";
-import { getMessaging, getToken, isSupported } from "https://www.gstatic.com/firebasejs/12.15.0/firebase-messaging.js";
-
-const CFG = {
-  app: 'kuryer',
-  col: 'couriers',                 /* token yazılan kolleksiya */
-  color: '#d4af37',
-  ask: 'Yeni sifarişlər gələn kimi, tətbiq bağlı olsa belə xəbər alın.',
-  /* İstəyə bağlı: Firebase Console → Project settings → Cloud Messaging → Web Push certificates → "Key pair".
-     Boş qalsa Firebase-in standart açarı işlədilir — push yenə işləyir. */
-  vapidKey: ''
-};
-const LS = 'bakugoPush_' + CFG.app;
-let swReg = null, currentUser = null, busy = false;
-
-/* ---------- Service Worker ---------- */
-async function registerSW() {
-  if (!('serviceWorker' in navigator)) return null;
-  try {
-    swReg = await navigator.serviceWorker.register('kuryer-sw.js', { scope: './kuryer.html' });
-    swReg.update().catch(() => {});
-    return swReg;
-  } catch (e) { console.warn('Service Worker qeydiyyatı alınmadı:', e); return null; }
-}
-const swReady = registerSW();
-
-/* ---------- Firebase tətbiqini gözlə (səhifənin öz modulu yaradır) ---------- */
-function waitApp() {
-  return new Promise((res) => {
-    let n = 0;
-    const t = setInterval(() => { const a = getApps(); if (a.length) { clearInterval(t); res(a[0]); } else if (++n > 200) { clearInterval(t); res(null); } }, 150);
-  });
-}
-
-/* ---------- Şüşə panel (bildiriş icazəsi / quraşdırma) ---------- */
-function css() {
-  if (document.getElementById('bgp-css')) return;
-  const s = document.createElement('style'); s.id = 'bgp-css';
-  s.textContent = `
-  .bgp-sheet{position:fixed;left:12px;right:12px;bottom:calc(14px + env(safe-area-inset-bottom,0px));z-index:2147483000;max-width:460px;margin:0 auto;
-    display:flex;gap:12px;align-items:center;padding:14px 14px 14px 16px;border-radius:20px;color:#fff;font:14px/1.4 system-ui,-apple-system,Segoe UI,sans-serif;
-    background:rgba(18,18,22,.72);-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%);
-    border:1px solid rgba(255,255,255,.16);box-shadow:0 18px 40px -12px rgba(0,0,0,.6),inset 0 1px 0 rgba(255,255,255,.12);
-    transform:translateY(140%);opacity:0;transition:transform .45s cubic-bezier(.2,1.1,.3,1),opacity .3s}
-  .bgp-sheet.show{transform:none;opacity:1}
-  .bgp-ic{flex:0 0 42px;height:42px;border-radius:13px;display:flex;align-items:center;justify-content:center;font-size:22px;background:${CFG.color};box-shadow:0 6px 16px -4px ${CFG.color}}
-  .bgp-tx{flex:1;min-width:0}.bgp-tx b{display:block;font-size:14.5px;margin-bottom:2px}.bgp-tx span{opacity:.72;font-size:12.5px}
-  .bgp-bt{display:flex;flex-direction:column;gap:6px}
-  .bgp-bt button{all:unset;cursor:pointer;text-align:center;padding:8px 13px;border-radius:12px;font-weight:700;font-size:13px;white-space:nowrap}
-  .bgp-bt .bgp-yes{background:${CFG.color};color:#fff;box-shadow:0 6px 14px -6px ${CFG.color}}
-  .bgp-bt .bgp-no{opacity:.6;font-weight:600!important;font-size:12px!important;padding:4px 8px!important}
-  .bgp-toast{position:fixed;left:12px;right:12px;top:calc(12px + env(safe-area-inset-top,0px));z-index:2147483001;max-width:460px;margin:0 auto;
-    display:flex;gap:11px;align-items:center;padding:12px 14px;border-radius:18px;color:#fff;font:14px/1.35 system-ui,-apple-system,sans-serif;
-    background:rgba(18,18,22,.78);-webkit-backdrop-filter:blur(20px) saturate(170%);backdrop-filter:blur(20px) saturate(170%);
-    border:1px solid rgba(255,255,255,.16);box-shadow:0 16px 36px -12px rgba(0,0,0,.6);transform:translateY(-140%);transition:transform .45s cubic-bezier(.2,1.1,.3,1)}
-  .bgp-toast.show{transform:none}.bgp-toast img{width:36px;height:36px;border-radius:10px}.bgp-toast b{display:block}.bgp-toast span{opacity:.75;font-size:12.5px}`;
-  document.head.appendChild(s);
-}
-function sheet(icon, title, text, yes, onYes, onNo) {
-  css();
-  const old = document.querySelector('.bgp-sheet'); if (old) old.remove();
-  const el = document.createElement('div'); el.className = 'bgp-sheet';
-  el.innerHTML = `<div class="bgp-ic">${icon}</div><div class="bgp-tx"><b>${title}</b><span>${text}</span></div>
-    <div class="bgp-bt"><button class="bgp-yes" type="button">${yes}</button><button class="bgp-no" type="button">Sonra</button></div>`;
-  document.body.appendChild(el);
-  requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('show')));
-  const close = () => { el.classList.remove('show'); setTimeout(() => el.remove(), 450); };
-  el.querySelector('.bgp-yes').onclick = () => { close(); onYes && onYes(); };
-  el.querySelector('.bgp-no').onclick = () => { close(); onNo && onNo(); };
-}
-function snooze(key, days) { try { localStorage.setItem(LS + key, String(Date.now() + days * 864e5)); } catch (e) {} }
-function snoozed(key) { try { return Number(localStorage.getItem(LS + key) || 0) > Date.now(); } catch (e) { return false; } }
-
-/* ---------- Bildiriş tokeni ---------- */
-async function enablePush(fromUser) {
-  if (busy || !currentUser) return false;
-  busy = true;
-  try {
-    if (!('Notification' in window) || !(await isSupported().catch(() => false))) {
-      if (fromUser) alert(/iPhone|iPad/.test(navigator.userAgent)
-        ? 'iPhone-da bildirişlər üçün: Safari → Paylaş → "Ana ekrana əlavə et", sonra tətbiqi ana ekrandan açın.'
-        : 'Bu brauzer push bildirişlərini dəstəkləmir.');
-      return false;
-    }
-    let perm = Notification.permission;
-    if (perm === 'default') perm = await Notification.requestPermission();
-    if (perm !== 'granted') { snooze('ask', 3); return false; }
-    const reg = (await swReady) || (await registerSW());
-    if (!reg) return false;
-    await navigator.serviceWorker.ready;
-    const app = getApps()[0];
-    const opts = { serviceWorkerRegistration: reg };
-    if (CFG.vapidKey) opts.vapidKey = CFG.vapidKey;
-    const token = await getToken(getMessaging(app), opts);
-    if (!token) return false;
-    const saved = localStorage.getItem(LS + 'tok');
-    if (saved !== token + '|' + currentUser.uid) {
-      await updateDoc(doc(getFirestore(app), CFG.col, currentUser.uid), {
-        fcmToken: token, fcmTokens: arrayUnion(token), fcmUpdatedAt: serverTimestamp(), fcmApp: CFG.app
-      });
-      localStorage.setItem(LS + 'tok', token + '|' + currentUser.uid);
-    }
-    console.log('✅ Push aktivdir (' + CFG.app + ')');
-    return true;
-  } catch (e) {
-    console.warn('Push aktivləşdirilmədi:', e && (e.code || e.message));
-    return false;
-  } finally { busy = false; }
-}
-window.BGPush = { enable: () => enablePush(true), status: () => ('Notification' in window ? Notification.permission : 'unsupported') };
-
-/* ---------- Açıq tətbiqdə gələn push ---------- */
-function inAppToast(title, body) {
-  css();
-  const t = document.createElement('div'); t.className = 'bgp-toast';
-  t.innerHTML = `<img src="icons/kuryer-96.png" alt=""><div><b></b><span></span></div>`;
-  t.querySelector('b').textContent = title || 'BakuGo'; t.querySelector('span').textContent = body || '';
-  document.body.appendChild(t);
-  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('show')));
-  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 500); }, 5000);
-}
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('message', (e) => {
-    const m = e.data || {};
-    if (m.type === 'bakugo-push') {
-      const snd = document.getElementById('notifSound');
-      if (snd) { try { snd.currentTime = 0; snd.play().catch(() => {}); } catch (x) {} }
-      if (document.visibilityState === 'visible') inAppToast(m.title, m.body);
-      window.dispatchEvent(new CustomEvent('bakugo-push', { detail: m }));
-    }
-  });
-}
-
-/* ---------- Giriş → icazə təklifi ---------- */
-(async () => {
-  const app = await waitApp();
-  if (!app) return;
-  onAuthStateChanged(getAuth(app), (user) => {
-    currentUser = user;
-    if (!user) return;
-    if (!('Notification' in window)) return;
-    if (Notification.permission === 'granted') { enablePush(false); return; }
-    if (Notification.permission === 'default' && !snoozed('ask')) {
-      setTimeout(() => sheet('🔔', 'Bildirişləri aktiv edin', CFG.ask, 'Aktiv et', () => enablePush(true), () => snooze('ask', 3)), 2500);
-    }
-  });
-})();
-
-/* ---------- Quraşdırma təklifi ---------- */
-let installEvt = null;
-window.addEventListener('beforeinstallprompt', (e) => {
-  e.preventDefault(); installEvt = e;
-  if (snoozed('install') || matchMedia('(display-mode: standalone)').matches) return;
-  setTimeout(() => {
-    if (!installEvt || document.querySelector('.bgp-sheet')) return;
-    sheet('📲', 'Tətbiqi quraşdırın', 'Ana ekrandan bir toxunuşla açın, daha sürətli işləsin.', 'Quraşdır',
-      async () => { try { installEvt.prompt(); await installEvt.userChoice; } catch (x) {} installEvt = null; }, () => snooze('install', 7));
-  }, 9000);
-});
-window.addEventListener('appinstalled', () => { installEvt = null; });
-
-</script>
 </body>
 </html>
